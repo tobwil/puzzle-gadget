@@ -23,7 +23,8 @@ class Game : Host {
   const char* debug();
   // Alle Sätze der Sprachausgabe (Schlüssel wie bei Speaker::speak, Text), für tools/mkvoice.py
   static void voiceLines(void (*out)(const char* key, const char* text));
-  uint32_t doneMask() const { return done_; }
+  uint64_t doneMask() const { return done_; }
+  const char* levelAnswer() const { return levels_[cur_]->answer(); }
   int hints() const { return hints_; }
   void setLang(int l) { lang_ = l & 1; }
   void skipIntro() { if (screen_ == INTRO) screen_ = TITLE; }
@@ -55,6 +56,7 @@ class Game : Host {
   int skipCost() const { return diff_ == 0 ? 1 : 3; }
   float playTime() const { return solvedAt_ >= 0 ? solvedAt_ : levelT_; }
   bool isDone(int i) const { return (done_ >> i) & 1; }
+  bool hintUsed(int i) const { return (hintUsed_ >> i) & 1; }
   bool unlocked(int i) const { return i == 0 || isDone(i) || isDone(i - 1); }
   int nextLevel() const;
   void save();
@@ -67,7 +69,7 @@ class Game : Host {
   Overlay overlay_ = NONE;
   float overlayT_ = 0;
   int cur_ = 0;
-  uint32_t done_ = 0, hintUsed_ = 0;
+  uint64_t done_ = 0, hintUsed_ = 0;   // je Level ein Bit (gespeichert als zwei 32-Bit-Werte)
   int hints_ = 15, lang_ = 0;
   bool sound_ = true;
   int vol_ = 2, diff_ = 1, introPage_ = 0, pickPage_ = 0;

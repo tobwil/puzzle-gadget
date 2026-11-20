@@ -10,15 +10,15 @@ Englisch und Deutsch lassen sich auf dem Titelbild umschalten (EN/DE):
 
 ## Die Level
 
-24 eigene Rätsel: Trickrätsel, die Fähigkeiten des Geräts nutzen, und Denkfragen mit Haken. Die naheliegende Antwort ist selten die richtige:
+36 Rätsel für Erwachsene. Level 1–12 sind Trickrätsel, die die Fähigkeiten des Geräts nutzen. Level 13–36 sind harte Denkaufgaben: Denkfallen, Logik, Kopfrechnen, Gedächtnis und Geschick. Zahlenantworten kommen über eine Tastatur. Jede falsche Antwort sperrt die Eingabe länger (4 s, 8 s, 16 s, höchstens 30 s), damit sich Durchprobieren nicht lohnt.
 
 | LVL | Aufgabe | Lösung (Spoiler) |
 |---|---|---|
-| 1 | Füttere den Dino | Bonbon ins Maul ziehen |
+| 1 | Füttere den Dino | erst auspacken (schnell über das Bonbon wischen), dann ins Maul ziehen |
 | 2 | Tippe auf das größte Tier | der winzige Elefant am Horizont, nicht die riesige Maus vorne |
-| 3 | Wie viele Bonbons? | Becher wegschieben, darunter liegt das fünfte |
+| 3 | Wie viele Bonbons? | Becher wegschieben, darunter liegen zwei: 6 |
 | 4 | Elefant in den Kühlschrank | Tür auf, Elefant rein, Tür zu |
-| 5 | Lass das Küken schlüpfen | Finger auf dem Ei liegen lassen (Wärme) |
+| 5 | Lass das Küken schlüpfen | Finger lange auf dem Ei liegen lassen (Wärme, ohne Fortschrittsanzeige) |
 | 6 | Dem Dino ist kalt | der gelbe „Deko“-Kreis ist die Sonne: zum Dino ziehen |
 | 7 | Öffne das Portal | einmal mit dem Finger um den Ring fahren |
 | 8 | Weck die Eule auf | Gerät schütteln (IMU) |
@@ -26,18 +26,30 @@ Englisch und Deutsch lassen sich auf dem Titelbild umschalten (EN/DE):
 | 10 | Wünsch dir was! | Kerzen auspusten (Mikrofon) oder schnell drüberwischen |
 | 11 | Ruf den Hund | auf den Tisch klopfen (IMU) oder rufen (Mikrofon) |
 | 12 | Hilf der Fledermaus beim Einschlafen | Gerät auf den Kopf drehen oder sie unter den Ast hängen |
-| 13 | 17 Schafe, alle bis auf 9 laufen weg | 9 |
-| 14 | Tippe auf das Wort, das BLAU geschrieben ist | „ROT“ (Stroop-Test: Farbe zählt, nicht das Wort) |
-| 15 | Füll das Glas | Gerät kippen (IMU) oder die Flasche mit dem Finger umkippen |
-| 16 | Was ist schwerer? | gleich, beides wiegt 1 kg |
-| 17 | Du überholst den Zweiten | du bist Zweiter |
-| 18 | Merk dir die Zahl! | 4719 (nur 3 s zu sehen) |
-| 19 | Wie oft kannst du 10 von 100 abziehen? | einmal, danach ist es 90 |
-| 20 | Wie viele Monate haben 28 Tage? | alle 12 |
-| 21 | Wie viele Dreiecke siehst du? | 6 |
-| 22 | Was kommt als Nächstes? 1, 1, 2, 3, 5, 8 | 13 (Fibonacci) |
-| 23 | Was passt nicht dazu? | Fledermaus (kein Vogel, der Pinguin schon) |
-| 24 | Drück NICHT den roten Knopf! | nichts tun und 9 s widerstehen |
+| 13 | Schläger und Ball kosten 1,10 € | 5 Cent |
+| 14 | 5 Maschinen, 5 Minuten, 5 Teile | 5 Minuten |
+| 15 | Seerosen verdoppeln sich, 48 Tage | 47 |
+| 16 | Stroop-Sprint | 10 Schriftfarben in Folge in 12 s tippen |
+| 17 | 10 schwarze, 10 weiße Socken im Dunkeln | 12 |
+| 18 | Merk dir die Zahl (7 Ziffern, 2 s) | jedes Mal eine neue Zahl |
+| 19 | 60 km hin mit 30, zurück mit 90 km/h | 45 km/h |
+| 20 | Drei falsch beschriftete Kisten | aus GEMISCHT ziehen |
+| 21 | Vater viermal so alt, in 20 Jahren doppelt | 40 |
+| 22 | Kettenrechnung im Kopf | 7 × 6 – 9 : 3 + 15 × 2 = 52 |
+| 23 | Kugel-Labyrinth | Gerät kippen, Löcher meiden (IMU) |
+| 24 | Ritter und Schurken | 1 (A Schurke, B Ritter) |
+| 25 | 1 kg Gurken, 99 % → 98 % Wasser | 500 g |
+| 26 | Mittwoch + 100 Tage | 5 (Freitag) |
+| 27 | Farbfolge nachtippen | 7 Farben merken |
+| 28 | Schnecke im 10-m-Brunnen | Tag 8 |
+| 29 | Welche Zahl fehlt? | 6 (magisches Quadrat) |
+| 30 | Ziffer 1 von 1 bis 100 | 21 |
+| 31 | Ziegenproblem | 67 % |
+| 32 | Quadrate auf dem Schachbrett | 204 |
+| 33 | Seil um den Äquator + 1 m | 16 cm |
+| 34 | Zeiger übereinander zwischen 12 und 24 Uhr | 10 |
+| 35 | Buchstaben der Antwort auf diese Frage | 4 („vier“) |
+| 36 | 1, 11, 21, 1211, 111221, ? | 312211 |
 
 Tipps: Am Anfang gibt es 15, jedes erstmals gelöste Level bringt einen dazu. Ein Tipp kostet beim ersten Ansehen pro Level einen. Mit „>>“ lässt sich ein Level für 3 Tipps überspringen. Spielstand, Tipps, Sprache, Lautstärke, Schwierigkeit und Bestzeiten bleiben im NVS gespeichert.
 
@@ -76,7 +88,7 @@ Serielle Befehle (115200 Baud, `pio device monitor`):
 | Befehl | Wirkung |
 |---|---|
 | `status` | Bildschirm, Level, gelöste Level, Tipps, Neigung, Mikrofonpegel |
-| `level N` | Level N (1–24) starten |
+| `level N` | Level N (1–36) starten |
 | `stufe N` | Schwierigkeit: 0 leicht, 1 normal, 2 schwer |
 | `sag KEY` | Sprach-Clip abspielen, z. B. `sag de_t05` |
 | `tipp X Y`, `wisch X0 Y0 X1 Y1` | Berührung nachstellen |
@@ -100,7 +112,7 @@ Mit Fenster (braucht SDL2, z. B. `brew install sdl2`): `make -C sim sdl && sim/b
 core/        Vektor-Renderer (368×448, kantengeglättet, bandweise), Schriften, Synthesizer, Klopf-/Schüttel-Erkennung
              (aus esp32-kids-adhs übernommen; neu: Hintergrundfarbe in Scene::bg)
 game/        game.cpp: Intro, Titel, Levelauswahl, Aufgabenkarte, Kopfzeile, Tipps, Überspringen, Schwierigkeit, Erfolgsbild, Energiesparen
-             levels.cpp: die 24 Level (je eine Klasse mit reset/tick/draw; Denkfragen über die Klasse Quiz + QuizSpec)
+             levels.cpp: die 36 Level (je eine Klasse mit reset/tick/draw; Denkfragen über Quiz + QuizSpec, Zahlentastatur NumPad mit Sperre Lock)
              art.cpp: Schnörkel, Funkeln, Symbole und die Figuren (Dino, Maus, Elefant, Eule, Fledermaus, Hund, Ei …)
 firmware/    Gerät: Rendern auf Kern 1, Display/Eingabe/Audio/Mikrofon auf Kern 0; voice.bin + voice_index.h (Sprach-Clips)
 lib/amoled18 Board-Schicht: Display (CO5300), Touch (CST816 bzw. CST9220 auf dem 2.16), IMU (QMI8658), Audio (ES8311, Mikrofone am ES7210 auf dem 2.16)

@@ -72,17 +72,56 @@ def pcm_heygen(text, lang, key, tmp):
         if code == b"200":
             url = json.loads(out)["data"]["audio_url"]
             return subprocess.run(["curl", "-sf", url], capture_output=True, check=True).stdout
-        if code != b"429" or attempt == 5:
+        if not (code == b"429" or code.startswith(b"5")) or attempt == 5:   # Drosselung und Serverfehler: später nochmal
             raise SystemExit(f"HeyGen: HTTP {code.decode()} {out[:300]!r}")
         time.sleep(2 ** attempt)
 
 
-def to_clip(raw):
-    pcm = [int.from_bytes(raw[i:i + 2], "little", signed=True) for i in range(0, len(raw) - 1, 2)]
-    thr = 300   # Stille vorne/hinten abschneiden (mit etwas Luft)
-    a = next((i for i, v in enumerate(pcm) if abs(v) > thr), 0)
-    b = len(pcm) - next((i for i, v in enumerate(reversed(pcm)) if abs(v) > thr), 0)
-    pcm = pcm[max(0, a - 400):min(len(pcm), b + 1600)]
+def trim(pcm, short=False):
+    """Sprache herausschneiden: Abschnitte in 10-ms-Fenstern finden, einen abgeschnittenen Fetzen am Ende
+    verwerfen (HeyGen setzt nach kurzen Sätzen manchmal zu einem neuen Laut an, der mitten drin endet),
+    dann sanft ein- und ausblenden. Bei kurzen Ausrufen (short) wiederholt die Stimme sich gern nach einer Pause:
+    dort zählt nur der Teil bis zur ersten Pause von mindestens 200 ms."""
+    W = RATE // 100
+    env = [max((abs(v) for v in pcm[i:i + W]), default=0) for i in range(0, len(pcm), W)]
+    thr = 0.04 * max(env + [1])
+    segs = []   # [start, end) in Fenstern, Lücken unter 150 ms zusammengefasst
+    for i, e in enumerate(env):
+        if e <= thr:
+            continue
+        if segs and i - segs[-1][1] < 15:
+            segs[-1][1] = i + 1
+        else:
+            segs.append([i, i + 1])
+    if not segs:
+        return pcm
+    def fragment(sg):   # abgerissener Ansatz am Dateiende: kurz (bei langen Texten auch deutlich leiser)
+        if sg[1] < len(env) - 3:
+            return False
+        if short:
+            return sg[1] - sg[0] < 35
+        return sg[1] - sg[0] < 20 and max(env[sg[0]:sg[1]]) < 0.5 * max(env)
+    while len(segs) > 1 and fragment(segs[-1]):
+        print(f"    (Fetzen am Ende entfernt: {(segs[-1][1] - segs[-1][0]) * 10} ms)")
+        segs.pop()
+    if short:
+        for i in range(len(segs) - 1):
+            if segs[i + 1][0] - segs[i][1] >= 20:
+                segs = segs[:i + 1]
+                break
+    a = max(0, segs[0][0] * W - 400)
+    b = min(len(pcm), segs[-1][1] * W + 12 * W)
+    out = pcm[a:b]
+    fi, fo = min(80, len(out)), min(640, len(out))
+    for i in range(fi):
+        out[i] = int(out[i] * i / fi)
+    for i in range(fo):
+        out[len(out) - 1 - i] = int(out[len(out) - 1 - i] * i / fo)
+    return out
+
+
+def to_clip(raw, short=False):
+    pcm = trim([int.from_bytes(raw[i:i + 2], "little", signed=True) for i in range(0, len(raw) - 1, 2)], short)
     gain = 29000 / max(1, max(abs(v) for v in pcm))
     return bytes(ulaw(int(v * gain)) for v in pcm)
 
@@ -99,7 +138,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for k, text in entries:
             lang = k[:2]
-            clip = to_clip(pcm_say(text, lang, tmp) if use_say else pcm_heygen(text, lang, key, tmp))
+            clip = to_clip(pcm_say(text, lang, tmp) if use_say else pcm_heygen(text, lang, key, tmp), len(text) <= 16)
             index.append((k, len(blob), len(clip)))
             blob += clip
             print(f"{k:8s} {len(clip) / RATE:4.1f} s  {text}")

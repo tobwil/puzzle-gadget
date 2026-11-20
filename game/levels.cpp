@@ -1,8 +1,9 @@
 // Die Level. Jedes Level ist ein kleines Trickrätsel: Die naheliegende Antwort ist selten die richtige.
 // Mechaniken: ziehen, tippen, halten, Kreis malen, schütteln, klopfen, pusten (Mikrofon), umdrehen (IMU),
 // und Teile der Oberfläche selbst (Aufgabentext, „Deko“) sind Teil des Rätsels.
-#include <array>
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 #include "ui.h"
 
@@ -41,6 +42,69 @@ struct Win {
   void reset() { at = -1; sent = false; }
 };
 
+// Sperre nach falscher Antwort: 4 s, 8 s, 16 s … (höchstens 30 s), damit Durchprobieren nicht lohnt
+struct Lock {
+  int fails = 0;
+  float until = -1;
+  bool on(const Frame& f) const { return f.t < until; }
+  float left(const Frame& f) const { return until - f.t; }
+  void fail(const Frame& f) { fails++; until = f.t + std::fmin(30.f, 4.f * float(1 << std::min(fails - 1, 4))); }
+  void reset() { fails = 0; until = -1; }
+};
+
+// Zahlentastatur (Lage in ui.h): Anzeige, darunter „1 2 3 4 5 6“ und „7 8 9 0 < OK“
+struct NumPad {
+  char buf[10] = {};
+  int n = 0, lastKey = -1;
+  float keyT = -10, wrongT = -10;
+  void clear() { n = 0; buf[0] = 0; }
+  static int hit(float x, float y) {
+    for (int k = 0; k < 12; k++)
+      if (std::fabs(x - npKeyX(k)) < NP_KW / 2 + 3 && std::fabs(y - npKeyY(k)) < NP_KH / 2 + 3) return k;
+    return -1;
+  }
+  // true, wenn OK mit einer Eingabe gedrückt wurde
+  bool tick(const Frame& f, Host& h, bool locked) {
+    if (!f.tap || locked) return false;
+    const int k = hit(f.x, f.y);
+    if (k < 0) return false;
+    lastKey = k;
+    keyT = f.t;
+    h.sfx(SFX_CLICK);
+    if (k < 10) {
+      if (n < 8) { buf[n++] = char(k == 9 ? '0' : '1' + k); buf[n] = 0; }
+    } else if (k == 10) {
+      if (n) buf[--n] = 0;
+    } else {
+      return n > 0;
+    }
+    return false;
+  }
+  bool is(const char* ans) const { return std::strcmp(buf, ans) == 0; }
+  void wrong(const Frame& f) { wrongT = f.t; clear(); }
+  void draw(Scene& s, const Frame& f, const Lock& lock, bool won) const {
+    const bool locked = lock.on(f);
+    const float sh = f.t - wrongT < 0.4f ? std::sin((f.t - wrongT) * 50) * 5 : 0;
+    s.rrect(CX - 110 + sh, NP_DY, 220, 36, 12, won ? INK : locked ? G1 : hex(0xE9FDFE));
+    if (locked) {
+      char b[16];
+      std::snprintf(b, sizeof b, "%d s", int(std::ceil(lock.left(f))));
+      s.text(fonts::heavy, b, CX, NP_DY + 2, G4, 1, Align::Center);
+    } else {
+      s.text(fonts::heavy, n ? buf : "?", CX + sh, NP_DY + 2, won ? WHITE : n ? INK : G3, 1, Align::Center);
+    }
+    static const char* L[12] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "<", "OK"};
+    const float a = locked ? 0.35f : 1;
+    for (int k = 0; k < 12; k++) {
+      const bool down = k == lastKey && f.t - keyT < 0.12f;
+      const float x = npKeyX(k) - NP_KW / 2, y = npKeyY(k) - NP_KH / 2;
+      s.rrect(x, y, NP_KW, NP_KH, 10, k == 11 ? INK : down ? BTN_DOWN : BTN, a);
+      if (k == 11) s.text(fonts::label, L[k], npKeyX(k), y + 9, WHITE, a, Align::Center);
+      else s.text(fonts::num, L[k], npKeyX(k), y + 5, INK, a, Align::Center);
+    }
+  }
+};
+
 // Zzz in Handschrift, steigt auf
 void zzz(Scene& s, float x, float y, float t, Col c) {
   for (int i = 0; i < 3; i++) {
@@ -52,7 +116,8 @@ void zzz(Scene& s, float x, float y, float t, Col c) {
 // ======================= 1: Füttere den Dino (ziehen) =======================
 class FeedDino : public Level {
   Drag candy;
-  bool eaten = false;
+  bool eaten = false, wrapped = true;
+  float unwrapT = -10;
   float eatT = 0;
   Win win;
   static constexpr float HX = 252, HY = 206, K = 0.92f;
@@ -61,17 +126,22 @@ class FeedDino : public Level {
 
  public:
   Txt task() const override { return {"Feed the dinosaur", "Füttere den Dino"}; }
-  Txt hint() const override { return {"Drag the candy right into its open mouth.", "Zieh das Bonbon direkt in sein offenes Maul."}; }
-  void reset() override { candy.set(84, 318); eaten = false; win.reset(); }
+  Txt hint() const override { return {"Nobody eats candy with the wrapper. Swipe quickly across it to unwrap it.", "Niemand isst Bonbons mit Papier. Wisch schnell darüber, um es auszupacken."}; }
+  void reset() override { candy.set(84, 318); eaten = false; wrapped = true; unwrapT = -10; win.reset(); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.9f);
     if (eaten) return;
+    if (wrapped && !candy.on && f.down && std::fabs(f.vx) > 500 && dist(f.x, f.y, candy.x, candy.y) < 40) {
+      wrapped = false; unwrapT = f.t; h.sfx(SFX_WHOOSH); h.say(candy.x + 40, candy.y - 50, {"Rip!", "Ritsch!"});
+    }
     if (candy.grab(f, 44)) {
       if (f.pressed) h.sfx(SFX_POP);
       candy.move(f);
       if (candy.drop(f)) {
-        if (dist(candy.x, candy.y, mouthX(), mouthY()) < 58) { eaten = true; eatT = f.t; h.sfx(SFX_CHOMP); win.start(f); }
-        else h.sfx(SFX_CLICK);
+        if (dist(candy.x, candy.y, mouthX(), mouthY()) < 58) {
+          if (wrapped) { h.say(mouthX(), mouthY() - 90, {"With the wrapper? Yuck!", "Mit Papier? Igitt!"}); h.sfx(SFX_NOPE); candy.set(84, 318); }
+          else { eaten = true; eatT = f.t; h.sfx(SFX_CHOMP); win.start(f); }
+        } else h.sfx(SFX_CLICK);
       }
     } else if (f.tap && dist(f.x, f.y, HX + 10, HY - 10) < 70) {
       h.say(f.x, f.y - 30, {"RAWR!", "RAWR!"});
@@ -90,10 +160,17 @@ class FeedDino : public Level {
     sparkle(s, 330, 128, 8, INK, 1, 0.1f);
     sparkle(s, 112, 232, 7, INK);
     if (!eaten) {
-      drawCandy(s, candy.x, candy.y, candy.on ? 1.15f : 1.f);
+      if (wrapped) drawCandy(s, candy.x, candy.y, candy.on ? 1.15f : 1.f);
+      else {
+        const float k = candy.on ? 1.15f : 1.f;
+        s.ellipse(candy.x, candy.y, 15 * k, 13 * k, PINK, HOTPINK);
+        s.ellipse(candy.x - 5 * k, candy.y - 5 * k, 5 * k, 3 * k, WHITE, 0.6f);
+        const float u = f.t - unwrapT;   // Papierfetzen fliegen weg
+        if (u < 0.8f) for (int i = 0; i < 2; i++) tri(s, candy.x + (i ? 1 : -1) * (20 + u * 90), candy.y - u * 60, candy.x + (i ? 1 : -1) * (34 + u * 90), candy.y - 8 - u * 60, candy.x + (i ? 1 : -1) * (26 + u * 90), candy.y + 10 - u * 60, PINK, 1 - u / 0.8f);
+      }
     } else {
       const float u = f.t - eatT;
-      if (u < 0.25f) drawCandy(s, mouthX(), mouthY(), 1 - u * 4);
+      if (u < 0.25f) s.ellipse(mouthX(), mouthY(), 15 * (1 - u * 4), 13 * (1 - u * 4), PINK, HOTPINK);
       for (int i = 0; i < 3; i++) {   // kleine Herzen steigen auf
         const float v = clampf((u - 0.3f - i * 0.15f) / 1.2f, 0, 1);
         if (v <= 0 || v >= 1) continue;
@@ -135,38 +212,34 @@ class Biggest : public Level {
   }
 };
 
-// ======================= 3: Wie viele Bonbons? (Becher anheben) =======================
+// ======================= 3: Wie viele Bonbons? (Becher anheben, Antwort tippen) =======================
 class CountCandy : public Level {
   Drag cup;
   Win win;
-  int wrong = -1;
-  float wrongT = 0;
-  static constexpr int NUM[4] = {3, 4, 5, 6};
-  float btnX(int i) const { return CX - 72 + i * 48; }
-  static constexpr float BY = 318;
+  NumPad pad;
+  Lock lock;
  public:
   Txt task() const override { return {"How many candies are there?", "Wie viele Bonbons gibt es?"}; }
-  Txt hint() const override { return {"Something is hiding under the cup. Move it!", "Unter dem Becher versteckt sich etwas. Schieb ihn weg!"}; }
-  void reset() override { cup.set(276, 236); win.reset(); wrong = -1; }
+  Txt hint() const override { return {"Not everything is in plain sight. Move the cup!", "Nicht alles liegt offen da. Schieb den Becher weg!"}; }
+  const char* answer() const override { return "6"; }
+  void reset() override { cup.set(276, 186); win.reset(); pad.clear(); lock.reset(); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.7f);
     if (win.on()) return;
     if (cup.grab(f, 48)) {
-      cup.move(f, 40, 150, W - 40, 268);
+      cup.move(f, 44, 130, W - 44, 186);
       cup.drop(f);
       return;
     }
-    if (!f.tap) return;
-    for (int i = 0; i < 4; i++)
-      if (std::fabs(f.x - btnX(i)) < 24 && std::fabs(f.y - BY) < 24) {
-        if (NUM[i] == 5) { win.start(f); h.sfx(SFX_WIN); wrong = i; }
-        else { h.nope(btnX(i), BY - 40); wrong = i; wrongT = f.t; }
-      }
+    if (pad.tick(f, h, lock.on(f))) {
+      if (pad.is("6")) { win.start(f); h.sfx(SFX_WIN); }
+      else { lock.fail(f); pad.wrong(f); h.nope(CX, NP_DY - 30); }
+    }
   }
   void draw(Scene& s, const Frame& f, int) override {
-    static const float C[5][3] = {{88, 170, 0.1f}, {176, 150, -0.2f}, {150, 230, 0.3f}, {72, 252, 0}, {276, 248, 0}};
-    static const Col CC[5] = {PINK, CYAN, HOTPINK, YELLOW, PURPLE};
-    for (int i = 0; i < 5; i++) drawCandy(s, C[i][0], C[i][1], 0.9f, CC[i]);
+    static const float C[6][2] = {{70, 150}, {150, 132}, {128, 198}, {56, 206}, {274, 172}, {278, 204}};   // die letzten zwei unter dem Becher
+    static const Col CC[6] = {PINK, CYAN, HOTPINK, YELLOW, PURPLE, MINT};
+    for (int i = 0; i < 6; i++) drawCandy(s, C[i][0], C[i][1], i < 4 ? 0.85f : 0.62f, CC[i]);
     // Becher (umgedreht): Körper, Rand unten, Henkel
     const float x = cup.x, y = cup.y;
     s.arc(x + 34, y - 4, 16, 6, 0.3f, 2.8f, G4);
@@ -175,14 +248,7 @@ class CountCandy : public Level {
     s.ellipse(x, y + 36, 40, 9, G2, G4);
     s.ellipse(x, y - 42, 30, 6, G4, G3);
     s.ellipse(x - 16, y - 10, 5, 22, WHITE, 0.5f);
-    for (int i = 0; i < 4; i++) {
-      const bool ok = win.on() && wrong == i;
-      const float sh = (i == wrong && !ok && f.t - wrongT < 0.4f) ? std::sin((f.t - wrongT) * 50) * 4 : 0;
-      s.rrect(btnX(i) - 21 + sh, BY - 21, 42, 42, 10, ok ? INK : BTN);
-      char b[4];
-      std::snprintf(b, sizeof b, "%d", NUM[i]);
-      s.text(fonts::num, b, btnX(i) + sh, BY - 14, ok ? WHITE : INK, 1, Align::Center);
-    }
+    pad.draw(s, f, lock, win.on());
   }
 };
 
@@ -259,7 +325,7 @@ class Hatch : public Level {
     if (win.on()) return;
     const bool onEgg = f.down && dist(f.x, f.y, EX, EY) < 70;
     const float before = heat;
-    if (onEgg && f.hold > 0.35f) heat += f.dt / 3.2f;
+    if (onEgg && f.hold > 0.35f) heat += f.dt / 7.0f;
     else heat = std::fmax(0.f, heat - f.dt * 0.08f);
     if (int(before * 5) != int(heat * 5) && heat > before) h.sfx(SFX_CRACK);
     if (f.tap && dist(f.x, f.y, EX, EY) < 70) { wobT = f.t; h.say(EX + 70, EY - 80, {"Not yet…", "Noch nicht…"}); }
@@ -274,10 +340,8 @@ class Hatch : public Level {
     }
     if (!win.on()) {
       const float wob = f.t - wobT < 0.6f ? std::sin((f.t - wobT) * 30) * (0.6f - (f.t - wobT)) : heat > 0.5f ? std::sin(f.t * 25) * 0.15f * heat : 0;
-      if (f.down && dist(f.x, f.y, EX, EY) < 70) s.glow(f.x, f.y, 60 + heat * 30, ORANGE, 0.25f + heat * 0.35f);
+      if (f.down && dist(f.x, f.y, EX, EY) < 70) s.glow(f.x, f.y, 60, ORANGE, 0.25f);
       drawEgg(s, EX, EY, 1.2f, heat, wob);
-      // Wärmebalken als Bogen unter dem Ei
-      if (heat > 0.02f) s.arc(EX, EY + 10, 92, 5, -0.9f, -0.9f + 1.8f * heat, AMBER, 0.9f);
     } else {
       const float u = win.since(f);
       drawDino(s, EX, 262 - ease(u / 0.5f) * 20, 0.55f, 1);
@@ -457,11 +521,9 @@ class HiddenMouse : public Level {
     s.rrect(110, 296, 148, 26, 4, hex(0xF5D800));
     static const float HOLES[][3] = {{170, 284, 7}, {214, 270, 9}, {238, 300, 5}, {140, 308, 6}};
     for (auto& c : HOLES) s.circle(c[0], c[1], c[2], hex(0xE0BC00));
-    // Maus hinter dem Text; der Schwanz schaut rechts heraus (der Hinweis)
+    // Maus ganz hinter dem Text versteckt
     const float pk = win.on() ? std::fabs(std::sin(win.since(f) * 6)) * 3 : 0;
     drawMouse(s, MX, MY - pk, 0.42f, true);
-    const float tp[] = {MX + 26, MY + 8, MX + 60, MY + 12, MX + 96, MY + 6, MX + 112, MY - 4, MX + 116, MY - 14};
-    for (int i = 0; i < 4; i++) s.capsule(tp[2 * i], tp[2 * i + 1], tp[2 * i + 2], tp[2 * i + 3], 1.3f, G4);
     // Aufgabentext auf weißem Schild, das die Maus verdeckt
     const char* t = tr(task(), lang);
     const float tw = Scene::textW(fonts::body, t);
@@ -623,381 +685,479 @@ class Bat : public Level {
 };
 
 
-// ======================= 13–24: Denkfragen und neue Tricks =======================
-// Quiz: eine Frage (der Aufgabentext), dazu Antwortknöpfe. Entweder eine Reihe kurzer Knöpfe (Zahlen)
-// oder ein 2×2-Raster mit Wörtern. Fast jede Frage hat einen Haken.
+// ======================= 13–36: harte Rätsel =======================
+// Quiz: die Frage ist der Aufgabentext. Antwort über die Zahlentastatur (answer) oder Auswahlknöpfe (opt).
+// Falsche Antworten sperren immer länger. Mit showFor gibt es vorher eine Merk-Phase, die nach einem Fehler wiederkommt.
 struct QuizSpec {
   Txt q, hint;
-  int n, correct;
+  const char* answer;          // Ziffernfolge; nullptr: Auswahl
+  int n, correct;              // Auswahl
   Txt opt[4];
-  bool grid;
-  Col ink[4];
-  Txt wrong[4];                                   // eigener Zuruf je falscher Antwort (leer: allgemeines „Nö!“)
+  const char* trap;            // typische Falschantwort …
+  Txt trapSay;                 // … mit eigenem Zuruf
   void (*art)(Scene&, float t, float won, int lang);
-  float showFor;                                  // Merk-Phase: Knöpfe erst danach
+  float showFor;
 };
 
 class Quiz : public Level {
   const QuizSpec& q;
   Win win;
+  NumPad pad;
+  Lock lock;
+  float phase0 = 0, wrongT = -10;
   int picked = -1, wrong = -1;
-  float wrongT = -10;
-  static constexpr float RW = 58, RH = 46, RG = 12, RY = 318;   // Reihe
-  static constexpr float GW = 152, GH = 42, GY0 = 252, GY1 = 300;   // Raster
-  void box(int i, float& x, float& y, float& w, float& h) const {
-    if (!q.grid) {
-      w = RW; h = RH;
-      const float tot = q.n * RW + (q.n - 1) * RG;
-      x = CX - tot / 2 + i * (RW + RG);
-      y = RY - RH / 2;
-    } else {
-      w = GW; h = GH;
-      const int row = i / 2, col = i % 2;
-      const bool alone = q.n == 3 && i == 2;
-      x = alone ? CX - GW / 2 : col ? CX + 6 : CX - 6 - GW;
-      y = row ? GY1 : GY0;
-    }
+  static constexpr float GW = 152, GH = 42, GY0 = 240, GY1 = 290;
+  void box(int i, float& x, float& y) const {
+    const bool alone = q.n == 3 && i == 2;
+    x = alone ? CX - GW / 2 : i % 2 ? CX + 6 : CX - 6 - GW;
+    y = i / 2 ? GY1 : GY0;
   }
-  bool ready(const Frame& f) const { return f.t >= q.showFor; }
+  void fail(const Frame& f, Host& h, const char* given) {
+    lock.fail(f);
+    pad.wrong(f);
+    wrongT = f.t;
+    if (q.showFor > 0) phase0 = lock.until;
+    if (q.trap && given && !std::strcmp(given, q.trap)) { h.say(CX, NP_DY - 30, q.trapSay); h.sfx(SFX_NOPE); }
+    else h.nope(CX, NP_DY - 30);
+  }
 
  public:
   explicit Quiz(const QuizSpec& s) : q(s) {}
   Txt task() const override { return q.q; }
   Txt hint() const override { return q.hint; }
   int tools() const override { return TOOL_THINK; }
-  void reset() override { win.reset(); picked = wrong = -1; wrongT = -10; }
+  const char* answer() const override { return q.answer; }
+  void reset() override { win.reset(); pad.clear(); lock.reset(); phase0 = 0; picked = wrong = -1; wrongT = -10; }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.9f);
-    if (win.on() || !f.tap || !ready(f)) return;
-    for (int i = 0; i < q.n; i++) {
-      float x, y, w, hh;
-      box(i, x, y, w, hh);
-      if (f.x < x - 4 || f.x > x + w + 4 || f.y < y - 4 || f.y > y + hh + 4) continue;
-      if (i == q.correct) { picked = i; win.start(f); h.sfx(SFX_WIN); }
-      else {
-        wrong = i; wrongT = f.t;
-        if (q.wrong[i].en) { h.say(x + w / 2, y - 34, q.wrong[i]); h.sfx(SFX_NOPE); }
-        else h.nope(x + w / 2, y - 34);
+    if (win.on()) return;
+    if (f.t - phase0 < q.showFor || lock.on(f)) return;
+    if (q.answer) {
+      if (pad.tick(f, h, false)) {
+        if (pad.is(q.answer)) { win.start(f); h.sfx(SFX_WIN); }
+        else { char given[10]; std::strcpy(given, pad.buf); fail(f, h, given); }
       }
+      return;
+    }
+    if (!f.tap) return;
+    for (int i = 0; i < q.n; i++) {
+      float x, y;
+      box(i, x, y);
+      if (f.x < x - 4 || f.x > x + GW + 4 || f.y < y - 4 || f.y > y + GH + 4) continue;
+      if (i == q.correct) { picked = i; win.start(f); h.sfx(SFX_WIN); }
+      else { wrong = i; fail(f, h, nullptr); }
     }
   }
   void draw(Scene& s, const Frame& f, int lang) override {
     const float won = win.on() ? ease(win.since(f) / 0.5f) : 0;
-    if (q.art) q.art(s, f.t, won, lang);
-    if (!ready(f)) return;
-    const float in = q.showFor > 0 ? ease((f.t - q.showFor) / 0.25f) : 1;
-    for (int i = 0; i < q.n; i++) {
-      float x, y, w, hh;
-      box(i, x, y, w, hh);
-      const bool ok = picked == i;
-      const float sh = (i == wrong && f.t - wrongT < 0.4f) ? std::sin((f.t - wrongT) * 50) * 4 : 0;
-      s.rrect(x + sh, y, w, hh, 12, ok ? INK : BTN, in);
-      const char* t = tr(q.opt[i], lang);
-      const Col c = ok ? WHITE : q.ink[i].r || q.ink[i].g || q.ink[i].b ? q.ink[i] : INK;
-      if (q.grid && Scene::textW(fonts::heavy, t) <= w - 14) s.text(fonts::heavy, t, x + w / 2 + sh, y + 5, c, in, Align::Center);
-      else if (q.grid) s.text(fonts::body, t, x + w / 2 + sh, y + 9, c, in, Align::Center);
-      else s.text(fonts::num, t, x + w / 2 + sh, y + hh / 2 - 14, c, in, Align::Center);
+    const float tt = f.t - phase0;
+    if (q.art) q.art(s, tt, won, lang);
+    if (q.showFor > 0 && tt >= 0 && tt < q.showFor) return;   // Merk-Phase: noch keine Eingabe
+    if (q.answer) pad.draw(s, f, lock, win.on());
+    else {
+      const bool locked = lock.on(f);
+      for (int i = 0; i < q.n; i++) {
+        float x, y;
+        box(i, x, y);
+        const bool ok = picked == i;
+        const float sh = (i == wrong && f.t - wrongT < 0.4f) ? std::sin((f.t - wrongT) * 50) * 4 : 0;
+        const float a = locked ? 0.35f : 1;
+        s.rrect(x + sh, y, GW, GH, 12, ok ? INK : BTN, a);
+        const char* t = tr(q.opt[i], lang);
+        const auto& fnt = Scene::textW(fonts::heavy, t) <= GW - 14 ? fonts::heavy : fonts::body;
+        s.text(fnt, t, x + GW / 2 + sh, y + (&fnt == &fonts::heavy ? 5 : 9), ok ? WHITE : INK, a, Align::Center);
+      }
+      if (locked) {
+        char b[16];
+        std::snprintf(b, sizeof b, "%d s", int(std::ceil(lock.left(f))));
+        s.text(fonts::heavy, b, CX, GY1 + GH + 6, G4, 1, Align::Center);
+      }
     }
-    if (win.on()) for (int i = 0; i < 4; i++) sparkle(s, 60 + i * 82, 150 + (i % 2) * 30, 9, i % 2 ? CYAN : INK, won, f.t * 2 + i);
+    if (win.on()) for (int i = 0; i < 4; i++) sparkle(s, 50 + i * 90, 210 + (i % 2) * 18, 9, i % 2 ? CYAN : INK, won, f.t * 2 + i);
   }
 };
 
-// ---- Bilder zu den Fragen ----
-void drawSheep(Scene& s, float x, float y, float k, bool flip) {
-  const float d = flip ? -1 : 1;
-  for (float lx : {-14.f, -4.f, 8.f, 16.f}) s.capsule(x + lx * k, y + 10 * k, x + lx * k, y + 26 * k, 2.4f * k, G6);
-  s.ellipse(x, y, 26 * k, 17 * k, G2);
-  for (int i = 0; i < 7; i++) s.circle(x + (-20 + i * 6.5f) * k, y + ((i % 2) ? -12 : -6) * k, 8 * k, i % 2 ? G1 : hex(0xFAFAFA));
-  s.ellipse(x + d * 26 * k, y - 4 * k, 9 * k, 11 * k, G5);
-  s.circle(x + d * 29 * k, y - 7 * k, 1.8f * k, WHITE);
-  s.ellipse(x + d * 20 * k, y - 13 * k, 5 * k, 3 * k, G4);
-}
-
-void artSheep(Scene& s, float t, float won, int) {
-  s.ellipse(CX, 262, 170, 14, G1, G2);
-  for (int i = 0; i < 6; i++) s.capsule(40 + i * 30, 270, 40 + i * 30, 214, 3, G4);   // Zaun
-  s.capsule(30, 228, 200, 228, 3, G4);
-  s.capsule(30, 252, 200, 252, 3, G4);
-  drawSheep(s, 90, 236, 0.9f, false);
-  drawSheep(s, 160, 222, 0.75f, false);
-  const float run = std::fmod(t * 0.5f, 1.f);   // ein Schaf haut ab
-  drawSheep(s, 250 + run * 120, 228 - std::fabs(std::sin(t * 9)) * 6, 0.8f, false);
-  sparkle(s, 300, 172, 8, INK, 1, t);
-  (void)won;
-}
-
-void artCalendar(Scene& s, float t, float won, int) {
-  const float x = CX - 70, y = 150;
-  s.rrect(x + 6, y + 6, 140, 108, 14, G2);
-  s.rrect(x, y, 140, 108, 14, WHITE);
-  s.rrect(x, y, 140, 108, 14, G3, 0.35f);
-  s.rrect(x + 3, y + 3, 134, 102, 12, WHITE);
-  s.rrect(x, y, 140, 30, 14, RED);
-  s.rrect(x, y + 16, 140, 14, 0, RED);
-  for (float rx : {x + 34, x + 106}) s.capsule(rx, y - 8, rx, y + 6, 4, G6);
-  s.text(fonts::huge, "28", CX, y + 40, INK, 1, Align::Center);
-  if (won > 0) for (int i = 0; i < 3; i++) sparkle(s, x - 30 + i * 100, y - 12 + (i % 2) * 30, 9, CYAN, won, t);
-}
-
-void artScale(Scene& s, float t, float won, int lang) {
-  const float bx = CX, by = 150;
-  s.capsule(bx, by, bx, 236, 4, G5);
-  s.ellipse(bx, 238, 40, 7, G4, G5);
-  s.circle(bx, by, 7, G6);
-  s.capsule(bx - 110, by + 2, bx + 110, by + 2, 3.5f, G5);   // Waagebalken: genau waagerecht
-  for (int sd = -1; sd <= 1; sd += 2) {
-    const float px = bx + sd * 110;
-    s.capsule(px, by, px - 30, by + 50, 1.3f, G4);
-    s.capsule(px, by, px + 30, by + 50, 1.3f, G4);
-    s.ellipse(px, by + 52, 40, 8, G3, G4);
-  }
-  for (int i = 0; i < 4; i++) {   // Federn links
-    const float fx = bx - 128 + i * 12, fy = by + 38 - (i % 2) * 8;
-    s.ellipse(fx, fy, 6, 16, G1, G2);
-    s.capsule(fx, fy - 14, fx, fy + 18, 0.8f, G4);
-  }
-  for (int i = 0; i < 3; i++) s.ellipse(bx + 98 + i * 13, by + 42 - (i == 1) * 8, 11, 8, G4, G6);   // Steine rechts
-  s.text(fonts::label, "1 kg", bx - 110, by + 64, INK, 1, Align::Center);
-  s.text(fonts::label, "1 kg", bx + 110, by + 64, INK, 1, Align::Center);
-  (void)t; (void)won; (void)lang;
-}
-
-void artPodium(Scene& s, float t, float won, int) {
-  const float base = 284;
-  const float H3[3] = {54, 78, 40};   // Plätze 2, 1, 3
-  const char* N[3] = {"2", "1", "3"};
-  for (int i = 0; i < 3; i++) {
-    const float x = CX - 105 + i * 70;
-    s.rrect(x, base - H3[i], 70, H3[i], 6, i == 1 ? YELLOW : G2);
-    s.text(fonts::num, N[i], x + 35, base - H3[i] + 8, INK, 1, Align::Center);
-  }
-  // Läufer kommt von hinten
-  const float u = std::fmod(t * 0.35f, 1.f), rx = 40 + u * 290;
-  s.circle(rx, 172, 9, G6);
-  s.capsule(rx, 180, rx - 4, 200, 4, G6);
-  s.capsule(rx - 4, 200, rx + 6 * std::sin(t * 14), 216, 3, G6);
-  s.capsule(rx - 4, 200, rx - 6 * std::sin(t * 14), 216, 3, G6);
-  s.capsule(rx, 186, rx + 10 * std::sin(t * 14), 196, 2.5f, G6);
-  if (won > 0) rays(s, CX, base - 100, 30, 42, 9, 2.5f, YELLOW, won, t);
-}
-
-void artMemory(Scene& s, float t, float won, int lang) {
-  if (t < 3) {
-    const float u = clampf(t / 3, 0, 1);
-    s.rrect(CX - 110, 160, 220, 86, 20, INK);
-    s.text(fonts::huge, "4719", CX, 176, WHITE, 1, Align::Center);
-    s.capsule(CX - 90, 264, CX + 90 - 180 * u, 264, 4, CYAN);
+// ---- Bilder ----
+void artChain(Scene& s, float t, float won, int lang) {
+  static const char* OP[6] = {"", "×", "–", ":", "+", "×"};
+  static const char* NUM[6] = {"7", "6", "9", "3", "15", "2"};
+  const float cy = 160;
+  if (t < 0) { s.text(fonts::heavy, "…", CX, cy - 16, G3, 1, Align::Center); return; }
+  const int i = int(t / 1.3f);
+  if (i < 6) {
+    const float u = std::fmod(t, 1.3f) / 1.3f;
+    s.circle(CX, cy, 56 + 4 * std::sin(u * PIF), i % 2 ? YELLOW : MINT);
+    const float nw = Scene::textW(fonts::huge, NUM[i]), ow = OP[i][0] ? Scene::textW(fonts::heavy, OP[i]) + 8 : 0;
+    const float x0 = CX - (nw + ow) / 2;
+    if (ow > 0) s.text(fonts::heavy, OP[i], x0, cy - 16, INK);
+    s.text(fonts::huge, NUM[i], x0 + ow, cy - 28, INK);
+    for (int k = 0; k < 6; k++) s.circle(CX - 40 + k * 16, 212, 4, k <= i ? INK : G2);
   } else {
-    s.rrect(CX - 110, 160, 220, 86, 20, BTN);
-    s.text(fonts::huge, "????", CX, 176, G3, 1, Align::Center);
-    s.text(fonts::hand, lang ? "Welche war es?" : "Which one was it?", CX, 202 - 82, INK, 1, Align::Center);
+    s.circle(CX, cy, 56, won > 0 ? CYAN : G1);
+    s.text(fonts::huge, "?", CX, cy - 28, won > 0 ? INK : G3, 1, Align::Center);
+    (void)lang;
   }
-  (void)won;
 }
 
-void artTriangles(Scene& s, float t, float won, int) {
-  const float ax = CX, ay = 132, lx = CX - 110, rx = CX + 110, by = 236;
-  tri(s, ax, ay, lx, by, rx, by, won > 0 ? hex(0xE9FDFE) : G1);
-  const float m1 = CX - 37, m2 = CX + 37;
-  for (auto& l : {std::array<float, 4>{ax, ay, lx, by}, {ax, ay, rx, by}, {lx, by, rx, by}, {ax, ay, m1, by}, {ax, ay, m2, by}})
-    s.capsule(l[0], l[1], l[2], l[3], 2.6f, INK);
+void artMagic(Scene& s, float t, float won, int) {
+  static const char* N[9] = {"4", "9", "2", "3", "5", "7", "8", "1", "?"};
+  const float c = 38, g = 4, x0 = CX - (3 * c + 2 * g) / 2, y0 = 104;
+  for (int i = 0; i < 9; i++) {
+    const float x = x0 + (i % 3) * (c + g), y = y0 + (i / 3) * (c + g);
+    const bool q = i == 8;
+    s.rrect(x, y, c, c, 8, q ? (won > 0 ? CYAN : YELLOW) : G1);
+    s.text(fonts::num, q && won > 0 ? "6" : N[i], x + c / 2, y + 6, INK, 1, Align::Center);
+  }
   (void)t;
 }
 
-void artMinus(Scene& s, float t, float won, int) {
-  s.rrect(CX - 120, 140, 240, 96, 12, hex(0x2F3B36));
-  s.rrect(CX - 114, 146, 228, 84, 8, hex(0x3C4A44));
-  s.text(fonts::heavy, "100 – 10 = 90", CX, 160, WHITE, 0.9f, Align::Center);
-  s.text(fonts::hand, "90 – 10 = ?", CX, 190, WHITE, 0.7f, Align::Center);
-  s.capsule(CX + 70, 232, CX + 90, 232, 4, WHITE, 0.8f);   // Kreide
-  (void)t; (void)won;
+void artChess(Scene& s, float t, float won, int) {
+  const float c = 11, x0 = CX - 4 * c, y0 = 128;
+  s.rrect(x0 - 4, y0 - 4, 8 * c + 8, 8 * c + 8, 4, G5);
+  for (int i = 0; i < 64; i++) s.rrect(x0 + (i % 8) * c, y0 + (i / 8) * c, c, c, 0, (i % 8 + i / 8) % 2 ? G4 : hex(0xF4F4F4));
+  const int k = 1 + int(t * 0.8f) % 8;   // ein wachsendes Quadrat zeigt, dass alle Größen zählen
+  s.capsule(x0, y0, x0 + k * c, y0, 1.6f, won > 0 ? CYAN : HOTPINK);
+  s.capsule(x0, y0 + k * c, x0 + k * c, y0 + k * c, 1.6f, won > 0 ? CYAN : HOTPINK);
+  s.capsule(x0, y0, x0, y0 + k * c, 1.6f, won > 0 ? CYAN : HOTPINK);
+  s.capsule(x0 + k * c, y0, x0 + k * c, y0 + k * c, 1.6f, won > 0 ? CYAN : HOTPINK);
 }
 
-void artSequence(Scene& s, float t, float won, int) {
-  static const char* N[7] = {"1", "1", "2", "3", "5", "8", "?"};
-  for (int i = 0; i < 7; i++) {
-    const float x = CX - 3 * 46 + i * 46, y = 190 + std::sin(i * 0.9f) * 14;
-    const bool q = i == 6;
-    const float r = q ? 21 + std::sin(t * 4) * 2 : 19;
-    s.circle(x, y, r, q ? (won > 0 ? CYAN : YELLOW) : (i % 2 ? PINK : MINT));
-    s.text(fonts::num, q && won > 0 ? "13" : N[i], x, y - 14, INK, 1, Align::Center);
-  }
-}
+const QuizSpec Q_BAT{
+    {"A bat and a ball cost €1.10 in total. The bat costs €1 more than the ball. How many cents does the ball cost?",
+     "Schläger und Ball kosten zusammen 1,10 €. Der Schläger kostet 1 € mehr als der Ball. Wie viele Cent kostet der Ball?"},
+    {"Ball = x, bat = x + 1. Together: 2x + 1 = 1.10.", "Ball = x, Schläger = x + 1. Zusammen: 2x + 1 = 1,10."},
+    "5", 0, 0, {}, "10", {"Then the bat would cost €1.10!", "Dann kostet der Schläger 1,10 €!"}, nullptr, 0};
+const QuizSpec Q_MACHINES{
+    {"5 machines need 5 minutes to make 5 parts. How many minutes do 100 machines need for 100 parts?",
+     "5 Maschinen brauchen 5 Minuten für 5 Teile. Wie viele Minuten brauchen 100 Maschinen für 100 Teile?"},
+    {"How long does ONE machine need for ONE part?", "Wie lange braucht EINE Maschine für EIN Teil?"},
+    "5", 0, 0, {}, "100", {"Not so fast!", "Nicht so schnell!"}, nullptr, 0};
+const QuizSpec Q_LILY{
+    {"Water lilies double their area every day. After 48 days the lake is covered. After how many days was half of it covered?",
+     "Seerosen verdoppeln ihre Fläche jeden Tag. Nach 48 Tagen ist der See bedeckt. Nach wie vielen Tagen war er zur Hälfte bedeckt?"},
+    {"Think backwards from day 48.", "Denk vom Tag 48 aus rückwärts."},
+    "47", 0, 0, {}, "24", {"Doubling, not even growth!", "Verdoppeln, nicht gleichmäßig!"}, nullptr, 0};
+const QuizSpec Q_SOCKS{
+    {"10 black and 10 white socks lie in the dark. How many must you take to be sure of having TWO BLACK ones?",
+     "Im Dunkeln liegen 10 schwarze und 10 weiße Socken. Wie viele musst du ziehen, um sicher ZWEI SCHWARZE zu haben?"},
+    {"Worst case: you draw all the white ones first.", "Schlimmster Fall: Du ziehst zuerst alle weißen."},
+    "12", 0, 0, {}, "3", {"A pair – but black?", "Ein Paar – aber schwarz?"}, nullptr, 0};
+const QuizSpec Q_SPEED{
+    {"A car drives 60 km at 30 km/h and the same 60 km back at 90 km/h. What is its average speed in km/h?",
+     "Ein Auto fährt 60 km mit 30 km/h hin und dieselben 60 km mit 90 km/h zurück. Wie hoch ist das Durchschnittstempo in km/h?"},
+    {"Total distance 120 km. How many hours in total?", "Gesamtstrecke 120 km. Wie viele Stunden insgesamt?"},
+    "45", 0, 0, {}, "60", {"Average the time, not the speeds!", "Rechne mit der Zeit, nicht mit den Tempi!"}, nullptr, 0};
+const QuizSpec Q_BOXES{
+    {"Three boxes: APPLES, PEARS, MIXED. Every label is wrong. From which box must you take one fruit to relabel all correctly?",
+     "Drei Kisten: ÄPFEL, BIRNEN, GEMISCHT. Jedes Schild ist falsch. Aus welcher Kiste musst du eine Frucht ziehen, um alle richtig zu beschriften?"},
+    {"The MIXED box is not mixed – it holds only one kind.", "Die Kiste GEMISCHT ist nicht gemischt – sie enthält nur eine Sorte."},
+    nullptr, 3, 2, {{"APPLES", "ÄPFEL"}, {"PEARS", "BIRNEN"}, {"MIXED", "GEMISCHT"}}, nullptr, {}, nullptr, 0};
+const QuizSpec Q_AGE{
+    {"A father is four times as old as his son. In 20 years he will be only twice as old. How old is the father today?",
+     "Ein Vater ist viermal so alt wie sein Sohn. In 20 Jahren ist er nur noch doppelt so alt. Wie alt ist der Vater heute?"},
+    {"Son = s: 4s + 20 = 2 × (s + 20)", "Sohn = s: 4s + 20 = 2 × (s + 20)"},
+    "40", 0, 0, {}, nullptr, {}, nullptr, 0};
+const QuizSpec Q_CHAIN{
+    {"Calculate along in your head!", "Rechne im Kopf mit!"},
+    {"7 × 6 = 42, then step by step. Restart shows it again.", "7 × 6 = 42, dann Schritt für Schritt. Neustart zeigt es noch einmal."},
+    "52", 0, 0, {}, nullptr, {}, artChain, 7.8f};
+const QuizSpec Q_KNIGHTS{
+    {"Knights always tell the truth, knaves always lie. A says: “We are both knaves.” How many of A and B are knights?",
+     "Ritter sagen immer die Wahrheit, Schurken lügen immer. A sagt: „Wir sind beide Schurken.“ Wie viele von A und B sind Ritter?"},
+    {"Could A be a knight? Then the sentence would be true …", "Kann A ein Ritter sein? Dann wäre der Satz wahr …"},
+    "1", 0, 0, {}, "0", {"Then A would be telling the truth …", "Dann hätte A ja die Wahrheit gesagt …"}, nullptr, 0};
+const QuizSpec Q_CUCUMBER{
+    {"1 kg of cucumbers is 99 % water. After drying, the water is only 98 %. How many grams do they weigh now?",
+     "1 kg Gurken bestehen zu 99 % aus Wasser. Nach dem Trocknen sind es nur noch 98 %. Wie viele Gramm wiegen sie jetzt?"},
+    {"10 g are not water. After drying they make up 2 % of the total.", "10 g sind kein Wasser. Nach dem Trocknen sind sie 2 % vom Ganzen."},
+    "500", 0, 0, {}, "990", {"Look at the dry mass!", "Achte auf die Trockenmasse!"}, nullptr, 0};
+const QuizSpec Q_WEEKDAY{
+    {"Today is Wednesday. Which weekday is it in 100 days? (1 = Monday … 7 = Sunday)",
+     "Heute ist Mittwoch. Welcher Wochentag ist in 100 Tagen? (1 = Montag … 7 = Sonntag)"},
+    {"100 days = 14 weeks + 2 days.", "100 Tage = 14 Wochen + 2 Tage."},
+    "5", 0, 0, {}, nullptr, {}, nullptr, 0};
+const QuizSpec Q_SNAIL{
+    {"A snail sits in a 10 m deep well. By day it climbs 3 m, at night it slides back 2 m. On which day does it reach the top?",
+     "Eine Schnecke sitzt in einem 10 m tiefen Brunnen. Tagsüber klettert sie 3 m, nachts rutscht sie 2 m ab. An welchem Tag ist sie oben?"},
+    {"After 7 days and nights it is at 7 m …", "Nach 7 Tagen und Nächten ist sie bei 7 m …"},
+    "8", 0, 0, {}, "10", {"On the last day it doesn't slide back!", "Am letzten Tag rutscht sie nicht mehr ab!"}, nullptr, 0};
+const QuizSpec Q_MAGIC{
+    {"Which number is missing?", "Welche Zahl fehlt?"},
+    {"Add up every row, column and diagonal.", "Addiere jede Zeile, Spalte und Diagonale."},
+    "6", 0, 0, {}, nullptr, {}, artMagic, 0};
+const QuizSpec Q_ONES{
+    {"You write down all numbers from 1 to 100. How many times do you write the digit 1?",
+     "Du schreibst alle Zahlen von 1 bis 100 auf. Wie oft schreibst du dabei die Ziffer 1?"},
+    {"Count units digits, tens digits – and 100.", "Zähl Einer, Zehner – und die 100."},
+    "21", 0, 0, {}, "20", {"Don't forget 100!", "Vergiss die 100 nicht!"}, nullptr, 0};
+const QuizSpec Q_MONTY{
+    {"Three doors, a car behind one. You pick door 1, the host opens door 3: a goat. Your chance of winning in % if you switch? (rounded)",
+     "Drei Türen, hinter einer ein Auto. Du wählst Tür 1, der Moderator öffnet Tür 3: Ziege. Gewinnchance in %, wenn du wechselst? (gerundet)"},
+    {"Your first pick wins in only 1 of 3 cases.", "Deine erste Wahl gewinnt nur in 1 von 3 Fällen."},
+    "67", 0, 0, {}, "50", {"The host knows where the car is!", "Der Moderator weiß, wo das Auto ist!"}, nullptr, 0};
+const QuizSpec Q_CHESS{
+    {"How many squares of all sizes are on a chessboard?", "Wie viele Quadrate aller Größen hat ein Schachbrett?"},
+    {"1×1: 64, 2×2: 49, 3×3: 36 … add up the square numbers.", "1×1: 64, 2×2: 49, 3×3: 36 … zähl die Quadratzahlen zusammen."},
+    "204", 0, 0, {}, "64", {"There are bigger ones too!", "Es gibt auch größere!"}, artChess, 0};
+const QuizSpec Q_ROPE{
+    {"A rope lies tight around the equator. You make it 1 m longer and lift it evenly all round. How many cm gap appear? (rounded)",
+     "Ein Seil liegt straff um den Äquator. Es wird 1 m länger und überall gleich angehoben. Wie viele cm Abstand entstehen? (gerundet)"},
+    {"The circumference grows by 2π × height: 2π × h = 100 cm.", "Der Umfang wächst um 2π × Höhe: 2π × h = 100 cm."},
+    "16", 0, 0, {}, "0", {"Surprisingly much!", "Überraschend viel!"}, nullptr, 0};
+const QuizSpec Q_CLOCK{
+    {"How often do the hour and minute hands cover each other between noon and midnight? (not counting 12:00 itself)",
+     "Wie oft stehen Stunden- und Minutenzeiger genau übereinander, zwischen 12 Uhr mittags und Mitternacht? (12:00 nicht mitgezählt)"},
+    {"Between 11 and 1 o'clock it happens only at 12:00.", "Zwischen 11 und 1 Uhr passiert es nur um 12:00."},
+    "10", 0, 0, {}, "11", {"Without 12:00!", "Ohne 12:00!"}, nullptr, 0};
+const QuizSpec Q_LETTERS{
+    {"How many letters does the answer to this question have?", "Wie viele Buchstaben hat die Antwort auf diese Frage?"},
+    {"Write the number out as a word.", "Schreib die Zahl als Wort."},
+    "4", 0, 0, {}, nullptr, {}, nullptr, 0};
+const QuizSpec Q_LOOKSAY{
+    {"What comes next? 1 – 11 – 21 – 1211 – 111221 – ?", "Was kommt als Nächstes? 1 – 11 – 21 – 1211 – 111221 – ?"},
+    {"Read each number aloud: 1211 is “one 1, one 2, two 1s”.", "Lies jede Zahl laut vor: 1211 ist „eine 1, eine 2, zwei 1“."},
+    "312211", 0, 0, {}, nullptr, {}, nullptr, 0};
 
-void artThink(Scene& s, float t, float won, int) {   // Denkblase für Fragen ohne eigenes Bild
-  const float y = 178 + std::sin(t * 2) * 4;
-  s.circle(CX, y, 40, won > 0 ? CYAN : YELLOW);
-  s.text(fonts::huge, "?", CX, y - 28, INK, 1, Align::Center);
-  s.circle(CX - 52, y + 34, 8, G2);
-  s.circle(CX - 68, y + 50, 5, G2);
-  sparkle(s, CX + 70, y - 30, 9, INK, 1, t);
-}
+uint32_t lcg(uint32_t& s) { s = s * 1664525u + 1013904223u; return s >> 8; }
 
-const QuizSpec Q_SHEEP{
-    {"A farmer has 17 sheep. All but 9 run away. How many are left?", "Ein Bauer hat 17 Schafe. Alle bis auf 9 laufen weg. Wie viele bleiben?"},
-    {"Read it again slowly: ALL BUT NINE run away.", "Lies langsam noch mal: Alle BIS AUF NEUN laufen weg."},
-    4, 2, {{"0", "0"}, {"8", "8"}, {"9", "9"}, {"17", "17"}}, false, {},
-    {{"Not all of them!", "Nicht alle!"}, {"17 – 9? Read again!", "17 – 9? Lies genau!"}, {}, {"Some did run!", "Ein paar sind weg!"}},
-    artSheep, 0};
-
-const QuizSpec Q_STROOP{
-    {"Tap the word that is written in BLUE", "Tippe auf das Wort, das BLAU geschrieben ist"},
-    {"Don't read the words – look at their color.", "Nicht lesen – schau nur auf die Farbe der Schrift."},
-    4, 1, {{"BLUE", "BLAU"}, {"RED", "ROT"}, {"GREEN", "GRÜN"}, {"YELLOW", "GELB"}}, true, {RED, BLUE, AMBER, GREEN},
-    {{"That one is red!", "Das ist rot!"}, {}, {"That's yellow!", "Das ist gelb!"}, {"That's green!", "Das ist grün!"}},
-    artThink, 0};
-
-const QuizSpec Q_FEATHER{
-    {"What is heavier?", "Was ist schwerer?"},
-    {"Look at the labels: both weigh exactly 1 kg.", "Schau auf die Schilder: Beides wiegt genau 1 kg."},
-    3, 2, {{"Feathers", "Federn"}, {"Stones", "Steine"}, {"Equal", "Gleich"}}, true, {},
-    {{"Light? 1 kg is 1 kg!", "Leicht? 1 kg ist 1 kg!"}, {"Look at the scale!", "Schau auf die Waage!"}, {}, {}},
-    artScale, 0};
-
-const QuizSpec Q_RACE{
-    {"In a race you overtake the runner in 2nd place. Which place are you in now?", "Du überholst beim Rennen den Zweiten. Auf welchem Platz bist du jetzt?"},
-    {"You take over their place – not the leader's.", "Du übernimmst seinen Platz – nicht den des Ersten."},
-    3, 1, {{"1.", "1."}, {"2.", "2."}, {"3.", "3."}}, false, {},
-    {{"The leader is still ahead!", "Der Erste ist noch vorne!"}, {}, {"You overtook someone!", "Du hast doch überholt!"}, {}},
-    artPodium, 0};
-
-const QuizSpec Q_MEMORY{
-    {"Remember the number!", "Merk dir die Zahl!"},
-    {"It is only shown for 3 seconds. Tap Restart to see it again.", "Sie ist nur 3 Sekunden zu sehen. Mit Neustart siehst du sie noch mal."},
-    4, 1, {{"4179", "4179"}, {"4719", "4719"}, {"4791", "4791"}, {"7419", "7419"}}, true, {},
-    {}, artMemory, 3.0f};
-
-const QuizSpec Q_MONTHS{
-    {"How many months have 28 days?", "Wie viele Monate haben 28 Tage?"},
-    {"Not only February… every month has at least 28 days.", "Nicht nur der Februar … jeder Monat hat mindestens 28 Tage."},
-    4, 3, {{"1", "1"}, {"2", "2"}, {"6", "6"}, {"12", "12"}}, false, {},
-    {{"Only February? Sure?", "Nur der Februar? Sicher?"}, {}, {}, {}},
-    artCalendar, 0};
-
-const QuizSpec Q_TRIANGLES{
-    {"How many triangles do you see?", "Wie viele Dreiecke siehst du?"},
-    {"Count the combined ones too: 3 small, 2 double and the big one.", "Zähl auch die zusammengesetzten: 3 kleine, 2 doppelte und das große."},
-    4, 3, {{"3", "3"}, {"4", "4"}, {"5", "5"}, {"6", "6"}}, false, {},
-    {{"Look for bigger ones!", "Such auch größere!"}, {}, {"Almost!", "Fast!"}, {}},
-    artTriangles, 0};
-
-const QuizSpec Q_MINUS{
-    {"How often can you subtract 10 from 100?", "Wie oft kannst du 10 von 100 abziehen?"},
-    {"After the first time it is no longer 100 …", "Nach dem ersten Mal ist es nicht mehr 100 …"},
-    4, 0, {{"1", "1"}, {"9", "9"}, {"10", "10"}, {"11", "11"}}, false, {},
-    {{}, {"From 100? Only once!", "Von 100? Nur einmal!"}, {"Then it's 90, not 100!", "Dann ist es 90, nicht 100!"}, {}},
-    artMinus, 0};
-
-const QuizSpec Q_SEQUENCE{
-    {"What comes next?", "Was kommt als Nächstes?"},
-    {"Each number is the sum of the two before it.", "Jede Zahl ist die Summe der beiden davor."},
-    4, 2, {{"11", "11"}, {"12", "12"}, {"13", "13"}, {"16", "16"}}, false, {},
-    {}, artSequence, 0};
-
-const QuizSpec Q_ODD{
-    {"Which one doesn't belong?", "Was passt nicht dazu?"},
-    {"Three of them are birds.", "Drei davon sind Vögel."},
-    4, 2, {{"Penguin", "Pinguin"}, {"Eagle", "Adler"}, {"Bat", "Fledermaus"}, {"Sparrow", "Spatz"}}, true, {},
-    {{"Can't fly – still a bird!", "Fliegt nicht – ist aber ein Vogel!"}, {}, {}, {}},
-    artThink, 0};
-
-// ======================= Füll das Glas (kippen) =======================
-class Pour : public Level {
-  float level = 0, ang = 0;
-  bool grabbed = false;
+// ======================= Merk dir die Zahl (7 Ziffern, 2 s) =======================
+class Memory7 : public Level {
   Win win;
-  static constexpr float BX = 112, BY = 262, GX = 264, GY = 248, GW = 74, GH = 88;
+  NumPad pad;
+  Lock lock;
+  char num[8] = {};
+  float phase0 = 0;
+  uint32_t seed = 0x5EED;
+  static constexpr float SHOW = 2.0f;
+  void fresh() {
+    num[0] = char('1' + lcg(seed) % 9);
+    for (int i = 1; i < 7; i++) num[i] = char('0' + lcg(seed) % 10);
+    num[7] = 0;
+  }
  public:
-  Txt task() const override { return {"Fill the glass", "Füll das Glas"}; }
-  Txt hint() const override { return {"Tilt the whole device to pour – or tip the bottle over with your finger.", "Kipp das ganze Gerät zum Eingießen – oder kipp die Flasche mit dem Finger um."}; }
-  int tools() const override { return TOOL_TILT | TOOL_FINGER; }
-  void reset() override { level = ang = 0; grabbed = false; win.reset(); }
+  Txt task() const override { return {"Remember the number! (2 seconds)", "Merk dir die Zahl! (2 Sekunden)"}; }
+  Txt hint() const override { return {"Chunk it: 3 + 4 digits, like a phone number. Restart shows a new one.", "In Häppchen merken: 3 + 4 Ziffern, wie eine Telefonnummer. Neustart zeigt eine neue."}; }
+  int tools() const override { return TOOL_THINK; }
+  const char* answer() const override { return num; }
+  void reset() override { win.reset(); pad.clear(); lock.reset(); phase0 = 0.4f; fresh(); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.9f);
-    if (f.pressed && dist(f.sx, f.sy, BX, BY - 60) < 60) grabbed = true;
-    if (!f.down) grabbed = false;
-    const float fingerA = grabbed ? clampf((f.x - f.sx) / 70.f, 0, 2.0f) : 0;
-    const float tiltA = clampf((std::fabs(f.tiltX) - 0.15f) * 3.2f, 0, 2.0f);
-    const float target = std::fmax(fingerA, tiltA);
-    ang += (target - ang) * clampf(f.dt * 10, 0, 1);
-    if (win.on()) return;
-    if (ang > 1.25f) {
-      const float before = level;
-      level = clampf(level + f.dt / 2.4f, 0, 1);
-      if (int(before * 4) != int(level * 4)) h.sfx(SFX_POP);
-      if (level >= 1) { win.start(f); h.sfx(SFX_WIN); h.say(GX, GY - 80, {"Cheers!", "Prost!"}, HOTPINK); }
+    if (win.on() || f.t - phase0 < SHOW) return;
+    if (pad.tick(f, h, lock.on(f))) {
+      if (pad.is(num)) { win.start(f); h.sfx(SFX_WIN); }
+      else { lock.fail(f); pad.wrong(f); h.nope(CX, NP_DY - 30); fresh(); phase0 = lock.until; }
     }
-    if (f.tap && !grabbed && dist(f.x, f.y, GX, GY + GH / 2) < 50) h.say(GX - 20, GY - 50, {"Still empty…", "Noch leer…"});
   }
   void draw(Scene& s, const Frame& f, int) override {
-    s.ellipse(CX, 340, 170, 10, G1, G2);   // Tisch
-    // Glas
-    const float wl = GY + GH - (GH - 8) * level;
-    if (level > 0) s.rrect(GX - GW / 2 + 5, wl, GW - 10, GY + GH - wl - 4, 8, CYAN, 0.75f);
-    s.rrect(GX - GW / 2, GY, 4, GH, 2, G3);
-    s.rrect(GX + GW / 2 - 4, GY, 4, GH, 2, G3);
-    s.rrect(GX - GW / 2, GY + GH - 5, GW, 6, 3, G3);
-    s.ellipse(GX - 18, GY + 30, 4, 22, WHITE, 0.6f);
-    // Flasche, um den Boden gedreht (0 = aufrecht, 1.57 = liegt nach rechts)
-    const float a = ang, dx = std::sin(a), dy = -std::cos(a);
-    auto P = [&](float d, float& x, float& y) { x = BX + dx * d; y = BY + dy * d; };
-    float x0, y0, x1, y1, x2, y2, x3, y3;
-    P(22, x0, y0); P(78, x1, y1); P(104, x2, y2); P(124, x3, y3);
-    s.capsule(x0, y0, x1, y1, 24, hex(0x3FA36B), 0.9f);
-    s.capsule(x1, y1, x2, y2, 14, hex(0x3FA36B), 0.9f);
-    s.capsule(x2, y2, x3, y3, 8, hex(0x2E7D52));
-    float lx0, ly0, lx1, ly1;
-    P(40, lx0, ly0); P(64, lx1, ly1);
-    s.capsule(lx0, ly0, lx1, ly1, 25, YELLOW);
-    if (ang > 1.25f && !win.on()) {   // Strahl
-      const float ex = GX - 8, ey = wl;
-      for (int i = 0; i < 6; i++) {
-        const float u0 = i / 6.f, u1 = (i + 1) / 6.f;
-        auto pt = [&](float u, float& x, float& y) { x = x3 + (ex - x3) * u; y = y3 + (ey - y3) * u * u; };
-        float ax, ay, bx, by;
-        pt(u0, ax, ay); pt(u1, bx, by);
-        s.capsule(ax, ay, bx + std::sin(f.t * 30 + i) * 1.2f, by, 3.5f, CYAN, 0.85f);
-      }
+    const float tt = f.t - phase0;
+    if (tt >= 0 && tt < SHOW) {
+      s.rrect(CX - 140, 120, 280, 76, 20, INK);
+      s.text(fonts::huge, num, CX, 132, WHITE, 1, Align::Center);
+      s.capsule(CX - 110, 212, CX + 110 - 220 * (tt / SHOW), 212, 4, CYAN);
+      return;
     }
-    if (win.on()) for (int i = 0; i < 3; i++) sparkle(s, GX - 50 + i * 50, GY - 30 + (i % 2) * 20, 9, i % 2 ? CYAN : INK, 1, f.t * 2);
+    s.rrect(CX - 140, 120, 280, 76, 20, win.on() ? CYAN : BTN);
+    s.text(fonts::huge, win.on() ? num : "???????", CX, 132, win.on() ? INK : G3, 1, Align::Center);
+    pad.draw(s, f, lock, win.on());
   }
 };
 
-// ======================= Drück NICHT den Knopf (abwarten) =======================
-class NoPress : public Level {
-  float calm = 0, pushT = -10;
-  int teased = 0;
+// ======================= Stroop-Sprint =======================
+class StroopSprint : public Level {
   Win win;
-  static constexpr float KX = CX, KY = 236, R = 64, NEED = 9;
+  int word = 0, ink = 1, streak = 0, wrongBtn = -1;
+  float startT = -1, wrongT = -10, okT = -10;
+  uint32_t seed = 0xC0FFEE;
+  char ans[2] = {};
+  static constexpr int NEED = 10;
+  static constexpr float LIMIT = 12, GW = 152, GH = 42, GY0 = 252, GY1 = 300;
+  static const Txt& name(int i) {
+    static const Txt N[4] = {{"RED", "ROT"}, {"BLUE", "BLAU"}, {"GREEN", "GRÜN"}, {"YELLOW", "GELB"}};
+    return N[i];
+  }
+  static Col color(int i) { static const Col C[4] = {RED, BLUE, GREEN, AMBER}; return C[i]; }
+  void next() {
+    word = lcg(seed) % 4;
+    ink = (word + 1 + lcg(seed) % 3) % 4;   // Farbe und Wort passen nie zusammen
+    ans[0] = char('0' + ink);
+  }
+  void box(int i, float& x, float& y) const { x = i % 2 ? CX + 6 : CX - 6 - GW; y = i / 2 ? GY1 : GY0; }
  public:
-  Txt task() const override { return {"Do NOT press the red button!", "Drück NICHT den roten Knopf!"}; }
-  Txt hint() const override { return {"Sometimes doing nothing is the solution. Just wait …", "Manchmal ist Nichtstun die Lösung. Einfach abwarten …"}; }
-  int tools() const override { return TOOL_WAIT; }
-  void reset() override { calm = 0; pushT = -10; teased = 0; win.reset(); }
+  Txt task() const override { return {"Tap the INK COLOR: 10 in a row within 12 seconds!", "Tippe die SCHRIFTFARBE: 10 richtige in Folge in 12 s!"}; }
+  Txt hint() const override { return {"Ignore what the word says. Only the color of the letters counts.", "Ignorier, was da steht. Nur die Farbe der Buchstaben zählt."}; }
+  int tools() const override { return TOOL_FINGER | TOOL_THINK; }
+  const char* answer() const override { return ans; }
+  void reset() override { win.reset(); streak = 0; startT = -1; wrongT = okT = -10; wrongBtn = -1; next(); }
   void tick(const Frame& f, Host& h) override {
-    win.tick(f, h, 1.0f);
+    win.tick(f, h, 0.9f);
     if (win.on()) return;
-    if (f.pressed && dist(f.x, f.y, KX, KY) < R + 10) {
-      pushT = f.t; calm = 0; teased = 0;
-      h.sfx(SFX_NOPE);
-      h.say(KX, KY - R - 40, {"I told you not to!", "Hab ich doch gesagt!"}, RED);
-      return;
+    if (startT >= 0 && f.t - startT > LIMIT) {
+      streak = 0; startT = -1; wrongT = f.t; wrongBtn = -1;
+      h.say(CX, 120, {"Too slow!", "Zu langsam!"}); h.sfx(SFX_NOPE);
+      next();
     }
-    calm += f.dt;
-    static const Txt TEASE[3] = {{"Press me!", "Drück mich!"}, {"Just once …", "Nur ganz kurz …"}, {"Pleeease!", "Bitteee!"}};
-    if (teased < 3 && calm > 2.5f + teased * 2.2f) { h.say(KX + (teased % 2 ? -60 : 60), KY - R - 30, TEASE[teased], G5); teased++; }
-    if (calm >= NEED) { win.start(f); h.sfx(SFX_MAGIC); h.say(KX, KY - R - 40, {"Nerves of steel!", "Starke Nerven!"}, HOTPINK); }
+    if (!f.tap) return;
+    for (int i = 0; i < 4; i++) {
+      float x, y;
+      box(i, x, y);
+      if (f.x < x - 3 || f.x > x + GW + 3 || f.y < y - 3 || f.y > y + GH + 3) continue;
+      if (i == ink) {
+        if (streak == 0) startT = f.t;
+        streak++; okT = f.t;
+        h.sfx(SFX_POP);
+        if (streak >= NEED) { win.start(f); h.sfx(SFX_WIN); }
+        else next();
+      } else {
+        streak = 0; startT = -1; wrongT = f.t; wrongBtn = i;
+        h.nope(x + GW / 2, y - 30);
+        next();
+      }
+    }
+  }
+  void draw(Scene& s, const Frame& f, int lang) override {
+    const float pop = f.t - okT < 0.15f ? 1.06f : 1;
+    if (!win.on()) s.text(fonts::huge, tr(name(word), lang), CX, 140 - (pop - 1) * 40, color(ink), 1, Align::Center);
+    else s.text(fonts::huge, "10/10", CX, 140, INK, 1, Align::Center);
+    if (startT >= 0 && !win.on()) {
+      const float u = clampf((f.t - startT) / LIMIT, 0, 1);
+      s.capsule(CX - 120, 206, CX + 120 - 240 * u, 206, 4, u > 0.75f ? HOTPINK : CYAN);
+    }
+    for (int i = 0; i < NEED; i++) s.circle(CX - 81 + i * 18, 226, 5, i < streak || win.on() ? INK : G2);
+    for (int i = 0; i < 4; i++) {
+      float x, y;
+      box(i, x, y);
+      const float sh = (i == wrongBtn && f.t - wrongT < 0.4f) ? std::sin((f.t - wrongT) * 50) * 4 : 0;
+      s.rrect(x + sh, y, GW, GH, 12, BTN);
+      s.text(fonts::heavy, tr(name(i), lang), x + GW / 2 + sh, y + 5, INK, 1, Align::Center);
+    }
+  }
+};
+
+// ======================= Farbfolge nachtippen =======================
+class Simon : public Level {
+  Win win;
+  Lock lock;
+  int seq[7] = {}, pos = 0;
+  float phase0 = 0, litT[4] = {-10, -10, -10, -10};
+  uint32_t seed = 0xBEEF;
+  char ans[8] = {};
+  static constexpr int N = 7;
+  static constexpr float STEP = 0.6f, ON = 0.4f, PW = 100, PH = 80;
+  static Col color(int i) { static const Col C[4] = {CYAN, YELLOW, HOTPINK, MINT}; return C[i]; }
+  static void pad(int i, float& x, float& y) { x = i % 2 ? CX + 4 : CX - 104; y = i / 2 ? 216 : 130; }
+  bool playing(const Frame& f) const { return f.t - phase0 < N * STEP; }
+ public:
+  Txt task() const override { return {"Watch, then repeat the color sequence", "Schau zu und tippe die Farbfolge nach"}; }
+  Txt hint() const override { return {"7 colors. Name them in your head while watching, e.g. “blue, yellow, pink …”.", "7 Farben. Sprich sie beim Zuschauen im Kopf mit, z. B. „blau, gelb, pink …“."}; }
+  int tools() const override { return TOOL_THINK; }
+  const char* answer() const override { return ans; }
+  void reset() override {
+    win.reset(); lock.reset(); pos = 0; phase0 = 0.8f;
+    for (int i = 0; i < N; i++) { seq[i] = lcg(seed) % 4; ans[i] = char('0' + seq[i]); }
+    ans[N] = 0;
+    for (float& t : litT) t = -10;
+  }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 0.9f);
+    if (win.on() || f.t < phase0 || playing(f) || lock.on(f) || !f.pressed) return;
+    for (int i = 0; i < 4; i++) {
+      float x, y;
+      pad(i, x, y);
+      if (f.x < x || f.x > x + PW || f.y < y || f.y > y + PH) continue;
+      litT[i] = f.t;
+      if (i == seq[pos]) {
+        h.sfx(SFX_POP);
+        if (++pos == N) { win.start(f); h.sfx(SFX_WIN); }
+      } else {
+        h.nope(CX, 100);
+        lock.fail(f);
+        pos = 0;
+        phase0 = lock.until + 0.4f;
+      }
+    }
+  }
+  void draw(Scene& s, const Frame& f, int lang) override {
+    const float tt = f.t - phase0;
+    const int step = tt >= 0 ? int(tt / STEP) : -1;
+    const bool on = step >= 0 && step < N && std::fmod(tt, STEP) < ON;
+    for (int i = 0; i < 4; i++) {
+      float x, y;
+      pad(i, x, y);
+      const bool lit = (on && seq[step] == i) || f.t - litT[i] < 0.25f || win.on();
+      s.rrect(x, y, PW, PH, 18, color(i), lit ? 1.f : 0.28f);
+      if (lit) s.glow(x + PW / 2, y + PH / 2, 70, color(i), 0.35f);
+    }
+    char b[32];
+    if (lock.on(f)) std::snprintf(b, sizeof b, "%d s", int(std::ceil(lock.left(f))));
+    else if (win.on()) std::snprintf(b, sizeof b, "7/7");
+    else if (f.t < phase0 || playing(f)) std::snprintf(b, sizeof b, "%s", lang ? "Schau zu …" : "Watch …");
+    else std::snprintf(b, sizeof b, "%s  %d/%d", lang ? "Du bist dran" : "Your turn", pos, N);
+    s.text(fonts::heavy, b, CX, 306, lock.on(f) ? G4 : INK, 1, Align::Center);
+  }
+};
+
+// ======================= Kugel-Labyrinth (kippen) =======================
+class Maze : public Level {
+  float bx = 0, by = 0, vx = 0, vy = 0;
+  int falls = 0;
+  float fallT = -10;
+  Win win;
+  static constexpr float R = 10, X0 = 20, Y0 = 104, X1 = 348, Y1 = 346;
+  static constexpr float SX = 44, SY = 132, GX = 44, GY = 312;
+  struct Box { float x0, y0, x1, y1; };
+  static constexpr Box WALL{X0, 160, 296, 290};
+  static constexpr float HOLES[4][2] = {{170, 118}, {240, 148}, {322, 226}, {150, 330}};
+  static constexpr float HR = 12;
+  static bool hitBox(float x, float y, const Box& b) {
+    const float cx = clampf(x, b.x0, b.x1), cy = clampf(y, b.y0, b.y1);
+    return (x - cx) * (x - cx) + (y - cy) * (y - cy) < R * R;
+  }
+  static bool blocked(float x, float y) { return x < X0 + R || x > X1 - R || y < Y0 + R || y > Y1 - R || hitBox(x, y, WALL); }
+ public:
+  Txt task() const override { return {"Roll the ball into the goal", "Roll die Kugel ins Ziel"}; }
+  Txt hint() const override { return {"Tilt the whole device – gently. In the last corridor, keep the ball close to the upper wall.", "Kipp das ganze Gerät – ganz sanft. Im letzten Gang die Kugel oben an der Wand halten."}; }
+  int tools() const override { return TOOL_TILT; }
+  void reset() override { bx = SX; by = SY; vx = vy = 0; falls = 0; fallT = -10; win.reset(); }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 0.9f);
+    if (win.on()) return;
+    const float ax = -f.tiltX * 900, ay = f.tiltY * 900;   // Schwerkraft in der Bildschirmebene
+    const int sub = 4;
+    const float dt = f.dt / sub;
+    for (int i = 0; i < sub; i++) {
+      vx = (vx + ax * dt) * (1 - 1.2f * dt);
+      vy = (vy + ay * dt) * (1 - 1.2f * dt);
+      const float sp = std::sqrt(vx * vx + vy * vy);
+      if (sp > 520) { vx *= 520 / sp; vy *= 520 / sp; }
+      if (!blocked(bx + vx * dt, by)) bx += vx * dt; else vx *= -0.25f;
+      if (!blocked(bx, by + vy * dt)) by += vy * dt; else vy *= -0.25f;
+      for (auto& hole : HOLES)
+        if (dist(bx, by, hole[0], hole[1]) < HR) {
+          falls++; fallT = f.t;
+          h.sfx(SFX_NOPE);
+          h.say(hole[0], hole[1] - 30, {"Plop!", "Plumps!"});
+          bx = SX; by = SY; vx = vy = 0;
+          return;
+        }
+      if (dist(bx, by, GX, GY) < 14) { bx = GX; by = GY; vx = vy = 0; win.start(f); h.sfx(SFX_WIN); return; }
+    }
   }
   void draw(Scene& s, const Frame& f, int) override {
-    const bool down = f.t - pushT < 0.25f;
-    const float pulse = win.on() ? 0 : 0.5f + 0.5f * std::sin(f.t * 5);
-    s.ellipse(KX, KY + 34, R + 26, 22, G4, G6);   // Sockel
-    s.ellipse(KX, KY + 20, R + 14, 22, G3, G5);
-    s.glow(KX, KY, R + 30, RED, 0.18f + 0.15f * pulse);
-    s.ellipse(KX, KY + (down ? 14 : 0), R, R * 0.62f, hex(0xFF5A5A), hex(0xB31414));
-    s.ellipse(KX - 18, KY - 14 + (down ? 14 : 0), 18, 9, WHITE, 0.45f);
-    if (!win.on() && calm > 0.3f) s.arc(KX, KY + 10, R + 34, 5, 0, TAU * clampf(calm / NEED, 0, 1), CYAN, 0.8f);
-    if (win.on()) for (int i = 0; i < 5; i++) sparkle(s, 60 + i * 62, 150 + (i % 2) * 34, 9, i % 2 ? CYAN : INK, 1, f.t * 2 + i);
+    s.rrect(X0 - 6, Y0 - 6, X1 - X0 + 12, Y1 - Y0 + 12, 14, G4);
+    s.rrect(X0, Y0, X1 - X0, Y1 - Y0, 10, hex(0xF6F1E8));
+    s.rrect(WALL.x0, WALL.y0, WALL.x1 - WALL.x0, WALL.y1 - WALL.y0, 8, G4);
+    s.rrect(WALL.x0 + 4, WALL.y0 + 4, WALL.x1 - WALL.x0 - 8, WALL.y1 - WALL.y0 - 8, 6, G3);
+    for (auto& hole : HOLES) { s.circle(hole[0], hole[1], HR + 2, G4); s.circle(hole[0], hole[1], HR, G6); }
+    s.circle(GX, GY, 17, win.on() ? CYAN : YELLOW);
+    s.circle(GX, GY, 12, G6);
+    if (!win.on()) {
+      s.circle(bx + 2, by + 3, R, G4, 0.5f);
+      s.circle(bx, by, R, hex(0xC9CED6));
+      s.circle(bx - 3, by - 3, 3.5f, WHITE, 0.9f);
+    } else {
+      rays(s, GX, GY, 24, 34, 9, 2.5f, YELLOW, 1, f.t);
+    }
+    (void)falls; (void)fallT;
   }
 };
 
@@ -1017,18 +1177,30 @@ Level* makeLevel(int i) {
     case 9: return new Candles;
     case 10: return new CallDog;
     case 11: return new Bat;
-    case 12: return new Quiz(Q_SHEEP);
-    case 13: return new Quiz(Q_STROOP);
-    case 14: return new Pour;
-    case 15: return new Quiz(Q_FEATHER);
-    case 16: return new Quiz(Q_RACE);
-    case 17: return new Quiz(Q_MEMORY);
-    case 18: return new Quiz(Q_MINUS);
-    case 19: return new Quiz(Q_MONTHS);
-    case 20: return new Quiz(Q_TRIANGLES);
-    case 21: return new Quiz(Q_SEQUENCE);
-    case 22: return new Quiz(Q_ODD);
-    default: return new NoPress;
+    case 12: return new Quiz(Q_BAT);
+    case 13: return new Quiz(Q_MACHINES);
+    case 14: return new Quiz(Q_LILY);
+    case 15: return new StroopSprint;
+    case 16: return new Quiz(Q_SOCKS);
+    case 17: return new Memory7;
+    case 18: return new Quiz(Q_SPEED);
+    case 19: return new Quiz(Q_BOXES);
+    case 20: return new Quiz(Q_AGE);
+    case 21: return new Quiz(Q_CHAIN);
+    case 22: return new Maze;
+    case 23: return new Quiz(Q_KNIGHTS);
+    case 24: return new Quiz(Q_CUCUMBER);
+    case 25: return new Quiz(Q_WEEKDAY);
+    case 26: return new Simon;
+    case 27: return new Quiz(Q_SNAIL);
+    case 28: return new Quiz(Q_MAGIC);
+    case 29: return new Quiz(Q_ONES);
+    case 30: return new Quiz(Q_MONTY);
+    case 31: return new Quiz(Q_CHESS);
+    case 32: return new Quiz(Q_ROPE);
+    case 33: return new Quiz(Q_CLOCK);
+    case 34: return new Quiz(Q_LETTERS);
+    default: return new Quiz(Q_LOOKSAY);
   }
 }
 

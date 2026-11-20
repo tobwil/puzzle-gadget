@@ -42,7 +42,7 @@ const IntroPage INTRO_PAGES[3] = {
 };
 const Txt T_YES{"YES", "JA"}, T_NO{"NO", "NEIN"}, T_OK{"OK", "OK"};
 const Txt T_SOLVED{"Level solved!", "Level geschafft!"}, T_PLUS{"+1 hint", "+1 Tipp"}, T_NEXT{"NEXT", "WEITER"};
-const Txt T_GENIUS{"GENIUS!", "GENIAL!"}, T_ALL{"All 24 puzzles solved.", "Alle 24 Rätsel gelöst."}, T_BACKTAP{"Tap to go back", "Tippen zum Start"};
+const Txt T_GENIUS{"GENIUS!", "GENIAL!"}, T_ALL{"All 36 puzzles solved.", "Alle 36 Rätsel gelöst."}, T_BACKTAP{"Tap to go back", "Tippen zum Start"};
 const char* const PRAISE[2][5] = {{"NICE!", "BRAVO!", "WOW!", "SMART!", "GENIUS!"}, {"STARK!", "BRAVO!", "WOW!", "SUPER!", "GENIAL!"}};
 const Txt NOPES[] = {{"Nope!", "Nö!"}, {"Hmm… no.", "Hmm… nein."}, {"Not quite!", "Nicht ganz!"}, {"Try again!", "Nochmal!"}};
 
@@ -54,8 +54,8 @@ constexpr float OB_Y = 318, OB_H = 52;
 
 Game::Game(dk::Synth& synth, dk::Store& store) : synth_(synth), store_(store) {
   for (int i = 0; i < LEVELS; i++) levels_[i] = makeLevel(i);
-  done_ = uint32_t(store_.get("bc_done", 0));
-  hintUsed_ = uint32_t(store_.get("bc_used", 0));
+  done_ = uint32_t(store_.get("bc_done", 0)) | uint64_t(uint32_t(store_.get("bc_done2", 0))) << 32;
+  hintUsed_ = uint32_t(store_.get("bc_used", 0)) | uint64_t(uint32_t(store_.get("bc_used2", 0))) << 32;
   hints_ = store_.get("bc_hints", 15);
   lang_ = store_.get("bc_lang", 0);
   vol_ = store_.get("bc_vol", store_.get("bc_snd", 1) ? 2 : 0) & 3;
@@ -63,14 +63,22 @@ Game::Game(dk::Synth& synth, dk::Store& store) : synth_(synth), store_(store) {
   cur_ = store_.get("bc_cur", 0) % LEVELS;
   setVolume(vol_);
   if (!store_.get("bc_intro", 0)) screen_ = INTRO;
+  if (store_.get("bc_ver", 1) < 3) {   // neue, schwere Fassung: Spielstand komplett auf null, Intro wieder von vorn
+    resetProgress();
+    store_.set("bc_intro", 0);
+    screen_ = INTRO;
+    store_.set("bc_ver", 3);
+  }
   motion.threshold = 0.12f;
 }
 
 Game::~Game() { for (auto* l : levels_) delete l; }
 
 void Game::save() {
-  store_.set("bc_done", int(done_));
-  store_.set("bc_used", int(hintUsed_));
+  store_.set("bc_done", int(uint32_t(done_)));
+  store_.set("bc_done2", int(uint32_t(done_ >> 32)));
+  store_.set("bc_used", int(uint32_t(hintUsed_)));
+  store_.set("bc_used2", int(uint32_t(hintUsed_ >> 32)));
   store_.set("bc_hints", hints_);
   store_.set("bc_cur", cur_);
 }
@@ -102,6 +110,8 @@ void Game::resetProgress() {
   hints_ = 15;
   cur_ = 0;
   save();
+  char k[8];
+  for (int i = 0; i < LEVELS; i++) { std::snprintf(k, sizeof k, "bc_t%d", i); if (store_.get(k, 0)) store_.set(k, 0); }   // Bestzeiten
   screen_ = TITLE;
   overlay_ = NONE;
 }
@@ -138,7 +148,7 @@ void Game::solve() {
   char k[8];
   std::snprintf(k, sizeof k, "p%d", pi);
   speak(k);
-  if (!isDone(cur_)) { done_ |= 1u << cur_; hints_++; save(); }
+  if (!isDone(cur_)) { done_ |= uint64_t(1) << cur_; hints_++; save(); }
   if (diff_ == 2) {
     const int t = int(solvedAt_ * 10 + 0.5f);
     if (bestT_ == 0 || t < bestT_) {
@@ -264,7 +274,7 @@ void Game::tick(const dk::Input& in) {
     const float dx = x_ - sx_;
     const bool swipe = !isTap && std::fabs(dx) > 60 && std::fabs(dx) > std::fabs(y_ - sy_);
     if (swipe && screen_ == INTRO) { introPage_ = clampf(introPage_ + (dx < 0 ? 1 : -1), 0, 2); sfx(SFX_CLICK); }
-    else if (swipe && screen_ == PICK) { pickPage_ = dx < 0 ? 1 : 0; sfx(SFX_CLICK); }
+    else if (swipe && screen_ == PICK) { pickPage_ = clampf(pickPage_ + (dx < 0 ? 1 : -1), 0, 2); sfx(SFX_CLICK); }
     else if (isTap) tap(x_, y_);
     uiTouch_ = false;
     pressedBtn_ = -1;
@@ -295,7 +305,7 @@ void Game::tick(const dk::Input& in) {
     // Leicht: nach 30 s ohne Lösung kommt der Tipp von selbst (gratis)
     if (diff_ == 0 && !l->solved && overlay_ == NONE && !autoHinted_ && levelT_ > 30) {
       autoHinted_ = true;
-      hintUsed_ |= 1u << cur_;
+      hintUsed_ |= uint64_t(1) << cur_;
       save();
       overlay_ = HINT; overlayT_ = 0; sfx(SFX_HINT);
     }
@@ -315,7 +325,7 @@ void Game::tap(float x, float y) {
     const bool can = hints_ >= skipCost();
     if (can && inRect(x, y, 40, OB_Y, 136, OB_H)) {   // Ja
       hints_ -= skipCost();
-      done_ |= 1u << cur_;
+      done_ |= uint64_t(1) << cur_;
       save();
       sfx(SFX_WHOOSH);
       if (cur_ + 1 < LEVELS) enterLevel(cur_ + 1);
@@ -330,7 +340,7 @@ void Game::tap(float x, float y) {
     if (overlayT_ < 0.4f) return;
     sfx(SFX_CLICK);
     const int n = nextLevel();
-    if (done_ == (1u << LEVELS) - 1 && cur_ == LEVELS - 1) { screen_ = END; overlay_ = NONE; }
+    if (done_ == (uint64_t(1) << LEVELS) - 1 && cur_ == LEVELS - 1) { screen_ = END; overlay_ = NONE; }
     else enterLevel(cur_ + 1 < LEVELS && !isDone(cur_ + 1) ? cur_ + 1 : n);
     return;
   }
@@ -353,7 +363,7 @@ void Game::tap(float x, float y) {
       break;
     case PICK:
       if (y < 72 && x < 80) { screen_ = TITLE; sfx(SFX_CLICK); break; }
-      if (y > 382) { pickPage_ = x < W / 2 ? 0 : 1; sfx(SFX_CLICK); break; }
+      if (y > 382) { pickPage_ = clampf(int((x - (W / 2 - 156)) / 104), 0, 2); sfx(SFX_CLICK); break; }
       for (int k = 0; k < 12; k++) {
         const int i = pickPage_ * 12 + k;
         const float tx = TX0 + (k % 3) * (TW + TGX), ty = TY0 + (k / 3) * (TH + TGY);
@@ -373,8 +383,8 @@ void Game::tap(float x, float y) {
         case B_RESTART: startLevel(cur_); sfx(SFX_CLICK); break;
         case B_HINT:
           if (diff_ == 2) { sfx(SFX_NOPE); break; }   // Schwer: keine Tipps
-          if (diff_ == 0 && !((hintUsed_ >> cur_) & 1)) { hintUsed_ |= 1u << cur_; save(); }   // Leicht: gratis
-          if (!((hintUsed_ >> cur_) & 1) && hints_ > 0) { hints_--; hintUsed_ |= 1u << cur_; save(); }
+          if (diff_ == 0 && !hintUsed(cur_)) { hintUsed_ |= uint64_t(1) << cur_; save(); }   // Leicht: gratis
+          if (!hintUsed(cur_) && hints_ > 0) { hints_--; hintUsed_ |= uint64_t(1) << cur_; save(); }
           overlay_ = HINT; overlayT_ = 0; sfx(SFX_HINT);
           break;
       }
@@ -470,11 +480,12 @@ void Game::drawLevels(Scene& s) {
   s.capsule(W / 2 - tw / 2 - 3, HEAD_Y + 5, W / 2 + tw / 2 + 3, HEAD_Y + 3, 8, YELLOW);
   s.text(fonts::heavy, tr(T_LEVELS, lang_), W / 2, HEAD_Y - 18, INK, 1, Align::Center);
   const int next = nextLevel();
-  for (int p = 0; p < 2; p++) {   // Seitenwahl unten
+  static const char* PAGES[3] = {"1 – 12", "13 – 24", "25 – 36"};
+  for (int p = 0; p < 3; p++) {   // Seitenwahl unten
     const bool on = p == pickPage_;
-    const float bx = W / 2 - 104 + p * 112;
+    const float bx = W / 2 - 152 + p * 104;
     s.rrect(bx, 390, 96, 36, 18, on ? INK : BTN);
-    s.text(fonts::label, p ? "13 – 24" : "1 – 12", bx + 48, 399, on ? WHITE : INK, 1, Align::Center);
+    s.text(fonts::label, PAGES[p], bx + 48, 399, on ? WHITE : INK, 1, Align::Center);
   }
   for (int k = 0; k < 12; k++) {
     const int i = pickPage_ * 12 + k;
@@ -501,9 +512,10 @@ void Game::drawEnd(Scene& s) {
 
 void Game::drawOverlay(Scene& s) {
   const float a = ease(overlayT_ / 0.2f);
-  s.rrect(0, 0, W, H, 0, WHITE, 0.94f * a);
+  // Die Aufgabenkarte deckt ganz ab (sonst schimmert z. B. die Merkzahl durch), die anderen lassen das Level ahnen
+  s.rrect(0, 0, W, H, 0, WHITE, overlay_ == TASK ? 1.f : 0.94f * a);
   if (overlay_ == HINT) {
-    const bool has = (hintUsed_ >> cur_) & 1;
+    const bool has = hintUsed(cur_);
     s.circle(W / 2, 130, 42, YELLOW, a);
     rays(s, W / 2, 130, 52, 64, 9, 2.6f, INK, a, 0.2f);
     iconBulb(s, W / 2, 132, 1.6f, INK);
@@ -675,8 +687,8 @@ void Game::voiceLines(void (*out)(const char* key, const char* text)) {
 }
 
 const char* Game::debug() {
-  std::snprintf(dbg_, sizeof dbg_, "screen %d level %d overlay %d solved 0x%06x hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
-                int(screen_), cur_ + 1, int(overlay_), unsigned(done_), hints_, lang_ ? "de" : "en", diff_, vol_, motion.tiltX, motion.tiltY, motion.tiltZ);
+  std::snprintf(dbg_, sizeof dbg_, "screen %d level %d overlay %d solved 0x%09llx hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
+                int(screen_), cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_, motion.tiltX, motion.tiltY, motion.tiltZ);
   return dbg_;
 }
 

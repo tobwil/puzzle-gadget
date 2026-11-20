@@ -75,10 +75,12 @@ class Level {
   // true: das Level zeichnet (und bewegt) den Aufgabentext selbst
   virtual bool ownsTask() const { return false; }
   virtual int tools() const { return TOOL_FINGER; }
+  // Lösung als Ziffernfolge (für die Simulator-Tour); nullptr, wenn das Level keine hat
+  virtual const char* answer() const { return nullptr; }
   bool solved = false;
 };
 
-constexpr int LEVELS = 24;
+constexpr int LEVELS = 36;
 Level* makeLevel(int i);   // 0 .. LEVELS-1
 
 // ---------------- Layout ----------------
@@ -86,6 +88,11 @@ constexpr float HEAD_Y = 40;       // Mitte der Kopfzeile („<  LVL.3  >>“)
 constexpr float TASK_Y = 70;       // Oberkante des Aufgabentexts
 constexpr float BTN_Y = 356, BTN_S = 50;   // Knöpfe unten (Restart, Hints)
 constexpr float BTN_LX = 30, BTN_RX = W - 30 - BTN_S;
+// Zahlentastatur der Rätsel: Anzeige oben, darunter zwei Reihen „1 2 3 4 5 6“ und „7 8 9 0 < OK“
+constexpr float NP_KW = 48, NP_KH = 36, NP_KG = 6, NP_Y0 = 272, NP_Y1 = 312, NP_X0 = (W - 6 * NP_KW - 5 * NP_KG) / 2;
+constexpr float NP_DY = 228;   // Oberkante der Anzeige; Frage und Bild müssen darüber enden
+inline float npKeyX(int k) { return NP_X0 + (k % 6) * (NP_KW + NP_KG) + NP_KW / 2; }   // k: 0–8 = 1–9, 9 = 0, 10 = <, 11 = OK
+inline float npKeyY(int k) { return (k < 6 ? NP_Y0 : NP_Y1) + NP_KH / 2; }
 
 // ---------------- Zeichenhelfer (art.cpp) ----------------
 inline float clampf(float v, float a, float b) { return v < a ? a : v > b ? b : v; }

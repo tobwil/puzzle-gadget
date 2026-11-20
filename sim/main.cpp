@@ -46,14 +46,14 @@ static void savePpm(const std::string& path) {
 // Nachgebildeter Beschleunigungssensor: Gerät liegt flach (z = 1 g) oder steht kopfüber (y = -1 g)
 struct FakeImu {
   bool shaking = false, upside = false;
-  float tiltX = 0;
+  float tiltX = 0, tiltY = 0;
   std::vector<uint32_t> knocks;
   uint32_t last = 0;
   void fill(Input& in, uint32_t ms) {
     in.nAcc = 0;
     if (!last) last = ms - 33;
     for (uint32_t t = last + 2; t <= ms && in.nAcc < 64; t += 2) {
-      float x = tiltX, y = upside ? -1.f : 0.f, z = upside ? 0.f : 1.f;
+      float x = tiltX, y = upside ? -1.f : tiltY, z = upside ? 0.f : 1.f;
       for (uint32_t k : knocks) {
         if (t < k) continue;
         const float u = (t - k) * 0.001f;
@@ -111,6 +111,12 @@ struct Sim {
     }
     frame({{false, int16_t(cx), int16_t(cy - r), ms}});
   }
+  // Antwort auf der Zahlentastatur eintippen und mit OK bestätigen
+  void type(const char* digits) {
+    for (const char* c = digits; *c; c++) { const int k = *c == '0' ? 9 : *c - '1'; tap(bc::npKeyX(k), bc::npKeyY(k)); }
+    tap(bc::npKeyX(11), bc::npKeyY(11));
+  }
+  void typeAnswer() { type(game.levelAnswer()); }
   void shot(const char* name) {
     renderAll();
     char p[256];
@@ -155,7 +161,7 @@ static int tour(const char* dir) {
     sim.tap(296, 384);
     sim.wait(0.3f);
     sim.shot("levels");
-    sim.tap(240, 408);   // Seite 13–24
+    sim.tap(184, 408);   // Seite 13–24
     sim.wait(0.2f);
     sim.shot("levels2");
     sim.tap(36, 40);
@@ -165,11 +171,11 @@ static int tour(const char* dir) {
     sim.tap(184, 358);
     using Fn = void (*)(Sim&);
     static const Fn SOLVE[bc::LEVELS] = {
-        [](Sim& s) { s.drag(84, 318, 228, 236, 0.8f); },                                   // Bonbon ins Maul
+        [](Sim& s) { s.drag(84, 318, 228, 236, 0.8f); s.drag(30, 318, 150, 318, 0.1f); s.drag(84, 318, 228, 236, 0.8f); },   // eingepackt (falsch), auspacken, füttern
         [](Sim& s) { s.tap(124, 296); s.wait(0.5f); s.tap(304, 208); },                   // erst die Maus (falsch), dann der Elefant
-        [](Sim& s) { s.tap(160, 318); s.drag(276, 236, 300, 160, 0.6f); s.tap(208, 318); },   // 4 (falsch), Becher weg, 5
+        [](Sim& s) { s.type("5"); s.drag(276, 186, 160, 140, 0.6f); s.wait(4.2f); s.type("6"); },   // 5 (falsch, Sperre), Becher weg, 6
         [](Sim& s) { s.tap(274, 260); s.drag(104, 282, 274, 250, 0.8f); s.tap(274, 260); },   // Tür auf, rein, zu
-        [](Sim& s) { s.tap(184, 236); s.wait(0.3f); s.hold(184, 236, 3.8f); },            // Tippen reicht nicht, halten
+        [](Sim& s) { s.tap(184, 236); s.wait(0.3f); s.hold(184, 236, 7.8f); },            // Tippen reicht nicht, lange halten
         [](Sim& s) { s.drag(62, 146, 236, 200, 0.8f); s.wait(1.5f); },                    // Sonne zum Dino
         [](Sim& s) { s.circle(184, 232, 86, 1.6f); },                                     // Ring nachfahren
         [](Sim& s) { s.tap(184, 230); s.imu.shaking = true; s.wait(1.2f); s.imu.shaking = false; },
@@ -177,18 +183,40 @@ static int tour(const char* dir) {
         [](Sim& s) { s.tap(184, 172); s.voice = 0.8f; s.wait(1.4f); s.voice = 0; },       // pusten
         [](Sim& s) { for (int i = 0; i < 2; i++) { s.imu.knocks.push_back(s.ms + 30); s.wait(0.3f); } },   // klopfen
         [](Sim& s) { s.tap(184, 160); s.imu.upside = true; s.wait(1.0f); s.imu.upside = false; },          // umdrehen
-        [](Sim& s) { s.tap(149, 318); s.tap(219, 318); },                                 // Schafe: 8 (falsch), 9
-        [](Sim& s) { s.tap(102, 273); s.tap(266, 273); },                                 // Stroop: BLAU (rot geschrieben), ROT
-        [](Sim& s) { s.imu.tiltX = 0.9f; s.wait(3.4f); s.imu.tiltX = 0; },                // Glas: kippen
-        [](Sim& s) { s.tap(102, 273); s.tap(184, 321); },                                 // Federn (falsch), gleich
-        [](Sim& s) { s.tap(114, 318); s.tap(184, 318); },                                 // Rennen: 1. (falsch), 2.
-        [](Sim& s) { s.wait(3.2f); s.tap(266, 273); },                                    // Zahl merken: 4719
-        [](Sim& s) { s.tap(219, 318); s.tap(79, 318); },                                  // 100 – 10: 10 (falsch), 1
-        [](Sim& s) { s.tap(79, 318); s.tap(289, 318); },                                  // Monate: 1 (falsch), 12
-        [](Sim& s) { s.tap(289, 318); },                                                  // Dreiecke: 6
-        [](Sim& s) { s.tap(219, 318); },                                                  // Folge: 13
-        [](Sim& s) { s.tap(102, 273); s.tap(102, 321); },                                 // Pinguin (falsch), Fledermaus
-        [](Sim& s) { s.tap(184, 236); s.wait(9.6f); },                                    // Knopf drücken (falsch), dann warten
+        [](Sim& s) { s.type("10"); s.wait(4.2f); s.typeAnswer(); },                       // Ball: 10 (Falle), dann 5
+        [](Sim& s) { s.typeAnswer(); },                                                   // Maschinen
+        [](Sim& s) { s.typeAnswer(); },                                                   // Seerosen
+        [](Sim& s) {                                                                      // Stroop-Sprint: 10 richtige
+          for (int i = 0; i < 10; i++) { const int k = s.game.levelAnswer()[0] - '0'; s.tap(k % 2 ? 266 : 102, k / 2 ? 321 : 273); }
+        },
+        [](Sim& s) { s.typeAnswer(); },                                                   // Socken
+        [](Sim& s) { s.wait(2.6f); s.typeAnswer(); },                                     // 7 Ziffern merken
+        [](Sim& s) { s.typeAnswer(); },                                                   // Durchschnittstempo
+        [](Sim& s) { s.tap(102, 261); s.wait(4.2f); s.tap(184, 311); },                   // Kisten: ÄPFEL (falsch), GEMISCHT
+        [](Sim& s) { s.typeAnswer(); },                                                   // Alter
+        [](Sim& s) { s.wait(8.2f); s.typeAnswer(); },                                     // Kettenrechnung
+        [](Sim& s) {                                                                      // Labyrinth: rechts, runter, links oben an der Wand
+          s.imu.tiltX = -0.5f; s.wait(2.0f);
+          s.imu.tiltX = 0; s.imu.tiltY = 0.5f; s.wait(1.6f);
+          s.imu.tiltX = 0.5f; s.imu.tiltY = -0.25f; s.wait(2.6f);
+          s.imu.tiltX = s.imu.tiltY = 0;
+        },
+        [](Sim& s) { s.typeAnswer(); },                                                   // Ritter
+        [](Sim& s) { s.typeAnswer(); },                                                   // Gurken
+        [](Sim& s) { s.typeAnswer(); },                                                   // Wochentag
+        [](Sim& s) {                                                                      // Farbfolge
+          s.wait(5.4f);
+          for (const char* c = s.game.levelAnswer(); *c; c++) { const int k = *c - '0'; s.tap(k % 2 ? 238 : 134, k / 2 ? 256 : 170); }
+        },
+        [](Sim& s) { s.typeAnswer(); },                                                   // Schnecke
+        [](Sim& s) { s.typeAnswer(); },                                                   // magisches Quadrat
+        [](Sim& s) { s.typeAnswer(); },                                                   // Ziffer 1
+        [](Sim& s) { s.typeAnswer(); },                                                   // Monty Hall
+        [](Sim& s) { s.typeAnswer(); },                                                   // Schachbrett
+        [](Sim& s) { s.typeAnswer(); },                                                   // Seil
+        [](Sim& s) { s.typeAnswer(); },                                                   // Uhrzeiger
+        [](Sim& s) { s.typeAnswer(); },                                                   // Buchstaben
+        [](Sim& s) { s.typeAnswer(); },                                                   // Look-and-say
     };
     for (int i = 0; i < bc::LEVELS; i++) {
       sim.game.startLevel(i);
@@ -223,7 +251,7 @@ static int tour(const char* dir) {
     sim.game.startLevel(2);
     sim.wait(2.0f);
     sim.shot("schwer_lvl3");
-    sim.tap(160, 318); sim.drag(276, 236, 300, 160, 0.6f); sim.tap(208, 318);
+    sim.drag(276, 186, 160, 140, 0.6f); sim.type("6");
     sim.wait(2.0f);
     sim.shot("schwer_geloest");
     sim.tap(184, 358);
@@ -231,10 +259,9 @@ static int tour(const char* dir) {
     sim.wait(0.6f);
     sim.shot("schwer_karte");
     sim.game.setDifficulty(1);
-    sim.game.startLevel(23);
+    sim.game.startLevel(bc::LEVELS - 1);
     sim.wait(0.3f);
-    sim.tap(184, 236);
-    sim.wait(10.5f);
+    sim.typeAnswer();
     sim.wait(3.0f);
     sim.tap(184, 360);
     sim.wait(0.6f);

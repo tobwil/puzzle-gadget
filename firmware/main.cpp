@@ -5,7 +5,7 @@
 //
 // Serielle Befehle (115200 Baud, eine Zeile):
 //   status         Spielstand, Neigung, Mikrofon
-//   level N        Level N (1–24) starten
+//   level N        Level N (1–36) starten
 //   tipp X Y       Tippen an Display-Position X, Y
 //   wisch X0 Y0 X1 Y1   Wischen
 //   klopf N        N künstliche Schläge auf den Tisch
