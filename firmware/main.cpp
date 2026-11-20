@@ -5,10 +5,12 @@
 //
 // Serielle Befehle (115200 Baud, eine Zeile):
 //   status         Spielstand, Neigung, Mikrofon
-//   level N        Level N (1–12) starten
+//   level N        Level N (1–24) starten
 //   tipp X Y       Tippen an Display-Position X, Y
 //   wisch X0 Y0 X1 Y1   Wischen
 //   klopf N        N künstliche Schläge auf den Tisch
+//   stufe N        Schwierigkeit 0 leicht, 1 normal, 2 schwer
+//   sag KEY        Sprach-Clip abspielen, z. B. „sag de_t05“
 //   reset          Spielstand löschen (Level, Tipps)
 //   log            Zwei-Sekunden-Protokoll (fps, Zeiten) ein/aus
 #include <Arduino.h>
@@ -19,6 +21,7 @@
 #include "amoled18.h"
 #include "fonts.h"
 #include "game.h"
+#include "voice_index.h"
 
 using namespace dk;
 namespace hw = amoled18;
@@ -42,6 +45,16 @@ struct NvsStore : Store {
 
 static Synth synth;
 static NvsStore store;
+
+// Sprachausgabe: vorab erzeugte Clips (tools/mkvoice.py), eingebettet aus firmware/voice.bin
+extern const uint8_t voiceStart[] asm("_binary_firmware_voice_bin_start");
+struct ClipSpeaker : Speaker {
+  void speak(const char* key) override {
+    for (int i = 0; i < VOICE_N; i++)
+      if (!strcmp(VOICE_CLIPS[i].key, key)) { synth.playClip(voiceStart + VOICE_CLIPS[i].off, VOICE_CLIPS[i].len); return; }
+  }
+};
+static ClipSpeaker speaker;
 static bc::Game* game;
 static Scene scene;
 
@@ -89,7 +102,9 @@ static void inputTask(void*) {
 }
 
 // ---------------- Display (Kern 0) ----------------
-static constexpr int BAND = 16, NBUF = 4;
+// Bänder sind so breit wie das Panel: Auf dem 2.16 liegt die Spielfläche mittig, der Rand bleibt weiß.
+// Ein Fenster, das nicht bei Spalte 0 beginnt, zeigte dort einen gestrichelten Streifen.
+static constexpr int BAND = 16, NBUF = 4, PW = hw::PANEL_W;
 struct Band { uint16_t* buf; int16_t y; };
 static QueueHandle_t freeQ, fullQ;
 static volatile int brightness = 0, curBrightness = -1;
@@ -103,9 +118,9 @@ static void displayTask(void*) {
       if (curBrightness != brightness) { curBrightness = brightness; gfx->setBrightness(curBrightness); }
       if (!b.buf) continue;   // nur Helligkeit setzen
       gfx->startWrite();
-      gfx->writeAddrWindow(0, 0, hw::LCD_W, hw::LCD_H);
+      gfx->writeAddrWindow(0, hw::OFF_Y, PW, hw::LCD_H);
     }
-    hw::bus()->writeBytes(reinterpret_cast<uint8_t*>(b.buf), W * BAND * 2);
+    hw::bus()->writeBytes(reinterpret_cast<uint8_t*>(b.buf), PW * BAND * 2);
     if (b.y + BAND >= H) gfx->endWrite();
     xQueueSend(freeQ, &b.buf, portMAX_DELAY);
   }
@@ -159,7 +174,7 @@ static void pollSerial() {
     int a, b, c2, d;
     if (!strcmp(line, "status")) {
       Serial.println(game->debug());
-      Serial.printf("mikrofon %.1f dBFS, pegel %.2f, imu %s\n", float(micDb), float(voiceLevel), hw::imuOk() ? "ok" : "fehlt");
+      Serial.printf("mikrofon %.1f dBFS, pegel %.2f, imu %s, touch %s\n", float(micDb), float(voiceLevel), hw::imuOk() ? "ok" : "fehlt", hw::touchOk() ? "ok" : "fehlt");
     } else if (sscanf(line, "level %d", &a) == 1) {
       game->startLevel(a - 1);
       Serial.printf("level %d\n", a);
@@ -174,6 +189,11 @@ static void pollSerial() {
     } else if (!strncmp(line, "klopf", 5)) {
       fakeKnocks = atoi(line + 5) > 0 ? atoi(line + 5) : 1;
       fakeNext = millis();
+    } else if (sscanf(line, "stufe %d", &a) == 1) {
+      game->setDifficulty(a);
+      Serial.printf("stufe %d (0 leicht, 1 normal, 2 schwer)\n", game->difficulty());
+    } else if (!strncmp(line, "sag ", 4)) {
+      speaker.speak(line + 4);
     } else if (!strcmp(line, "reset")) {
       game->resetProgress();
       Serial.println("spielstand gelöscht");
@@ -189,17 +209,19 @@ void setup() {
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);   // liest niemand mit, darf print nicht blockieren
   if (!hw::begin()) Serial.println("Display-Init fehlgeschlagen");
-  Serial.printf("IMU %s\n", hw::imuOk() ? "ok" : "fehlt");
-  const bool audio = hw::audioBegin(Synth::RATE, 70);
+  Serial.printf("IMU %s, Touch %s\n", hw::imuOk() ? "ok" : "fehlt", hw::touchOk() ? "ok" : "fehlt");
+  const bool audio = hw::audioBegin(Synth::RATE, 75);
   Serial.printf("Audio %s\n", audio ? "ok" : "fehlt");
   store.begin();
   game = new bc::Game(synth, store);
+  game->speaker = &speaker;
 
   freeQ = xQueueCreate(NBUF, sizeof(uint16_t*));
   fullQ = xQueueCreate(NBUF + 1, sizeof(Band));
   for (int i = 0; i < NBUF; i++) {
-    uint16_t* b = static_cast<uint16_t*>(heap_caps_malloc(W * BAND * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    uint16_t* b = static_cast<uint16_t*>(heap_caps_malloc(PW * BAND * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
     if (!b) Serial.println("Zu wenig RAM für die Bänder");
+    else for (int k = 0; k < PW * BAND; k++) b[k] = 0xFFFF;   // weißer Rand
     xQueueSend(freeQ, &b, 0);
   }
   xTaskCreatePinnedToCore(displayTask, "display", 4096, nullptr, 3, nullptr, 0);
@@ -245,7 +267,7 @@ void loop() {
       if (in.acc[i].ms >= fakeStart && u < 0.1f) in.acc[i].z += 0.4f * std::exp(-u / 0.012f) * std::sin(6.2831853f * 90 * u + 0.6f);
     }
   in.boot = hw::bootPressed();
-  in.voice = voiceLevel;
+  in.voice = synth.clipPlaying() ? 0 : voiceLevel;   // die eigene Stimme soll keine Mikrofon-Level lösen
   in.ms = millis();
 
   game->tick(in);
@@ -266,7 +288,12 @@ void loop() {
   for (int y = 0; y < H; y += BAND) {
     uint16_t* buf;
     xQueueReceive(freeQ, &buf, portMAX_DELAY);
-    scene.rasterize(buf, y, BAND, true);   // Panel erwartet Big Endian
+    if (hw::OFF_X == 0) scene.rasterize(buf, y, BAND, true);   // Panel erwartet Big Endian
+    else {
+      static uint16_t narrow[W * BAND];
+      scene.rasterize(narrow, y, BAND, true);
+      for (int r = 0; r < BAND; r++) memcpy(buf + r * PW + hw::OFF_X, narrow + r * W, W * 2);
+    }
     Band b{buf, int16_t(y)};
     xQueueSend(fullQ, &b, portMAX_DELAY);
   }

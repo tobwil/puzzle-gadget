@@ -46,13 +46,14 @@ static void savePpm(const std::string& path) {
 // Nachgebildeter Beschleunigungssensor: Gerät liegt flach (z = 1 g) oder steht kopfüber (y = -1 g)
 struct FakeImu {
   bool shaking = false, upside = false;
+  float tiltX = 0;
   std::vector<uint32_t> knocks;
   uint32_t last = 0;
   void fill(Input& in, uint32_t ms) {
     in.nAcc = 0;
     if (!last) last = ms - 33;
     for (uint32_t t = last + 2; t <= ms && in.nAcc < 64; t += 2) {
-      float x = 0, y = upside ? -1.f : 0.f, z = upside ? 0.f : 1.f;
+      float x = tiltX, y = upside ? -1.f : 0.f, z = upside ? 0.f : 1.f;
       for (uint32_t k : knocks) {
         if (t < k) continue;
         const float u = (t - k) * 0.001f;
@@ -145,12 +146,23 @@ static int tour(const char* dir) {
     sim.game.setLang(lang);
     printf("== Sprache %s ==\n", lang ? "de" : "en");
     sim.wait(1);
+    for (int p = 0; p < 3; p++) {   // Intro beim ersten Start: drei Karten
+      sim.shot(("intro" + std::to_string(p + 1)).c_str());
+      sim.tap(184, 408);
+      sim.wait(0.3f);
+    }
     sim.shot("titel");
     sim.tap(296, 384);
     sim.wait(0.3f);
     sim.shot("levels");
+    sim.tap(240, 408);   // Seite 13–24
+    sim.wait(0.2f);
+    sim.shot("levels2");
     sim.tap(36, 40);
-    sim.tap(142, 384);   // Spielen
+    sim.tap(142, 384);   // Spielen: erst die Aufgabenkarte
+    sim.wait(0.6f);
+    sim.shot("aufgabenkarte");
+    sim.tap(184, 358);
     using Fn = void (*)(Sim&);
     static const Fn SOLVE[bc::LEVELS] = {
         [](Sim& s) { s.drag(84, 318, 228, 236, 0.8f); },                                   // Bonbon ins Maul
@@ -165,6 +177,18 @@ static int tour(const char* dir) {
         [](Sim& s) { s.tap(184, 172); s.voice = 0.8f; s.wait(1.4f); s.voice = 0; },       // pusten
         [](Sim& s) { for (int i = 0; i < 2; i++) { s.imu.knocks.push_back(s.ms + 30); s.wait(0.3f); } },   // klopfen
         [](Sim& s) { s.tap(184, 160); s.imu.upside = true; s.wait(1.0f); s.imu.upside = false; },          // umdrehen
+        [](Sim& s) { s.tap(149, 318); s.tap(219, 318); },                                 // Schafe: 8 (falsch), 9
+        [](Sim& s) { s.tap(102, 273); s.tap(266, 273); },                                 // Stroop: BLAU (rot geschrieben), ROT
+        [](Sim& s) { s.imu.tiltX = 0.9f; s.wait(3.4f); s.imu.tiltX = 0; },                // Glas: kippen
+        [](Sim& s) { s.tap(102, 273); s.tap(184, 321); },                                 // Federn (falsch), gleich
+        [](Sim& s) { s.tap(114, 318); s.tap(184, 318); },                                 // Rennen: 1. (falsch), 2.
+        [](Sim& s) { s.wait(3.2f); s.tap(266, 273); },                                    // Zahl merken: 4719
+        [](Sim& s) { s.tap(219, 318); s.tap(79, 318); },                                  // 100 – 10: 10 (falsch), 1
+        [](Sim& s) { s.tap(79, 318); s.tap(289, 318); },                                  // Monate: 1 (falsch), 12
+        [](Sim& s) { s.tap(289, 318); },                                                  // Dreiecke: 6
+        [](Sim& s) { s.tap(219, 318); },                                                  // Folge: 13
+        [](Sim& s) { s.tap(102, 273); s.tap(102, 321); },                                 // Pinguin (falsch), Fledermaus
+        [](Sim& s) { s.tap(184, 236); s.wait(9.6f); },                                    // Knopf drücken (falsch), dann warten
     };
     for (int i = 0; i < bc::LEVELS; i++) {
       sim.game.startLevel(i);
@@ -191,9 +215,26 @@ static int tour(const char* dir) {
     sim.shot("ueberspringen");
     sim.tap(W - 108, 344);
     // Ende
-    sim.game.startLevel(11);
+    sim.game.setDifficulty(0);   // Leicht: Karte mit Werkzeugen
+    sim.game.enterLevel(7);
+    sim.wait(0.6f);
+    sim.shot("leicht_karte");
+    sim.game.setDifficulty(2);   // Schwer: Stoppuhr
+    sim.game.startLevel(2);
+    sim.wait(2.0f);
+    sim.shot("schwer_lvl3");
+    sim.tap(160, 318); sim.drag(276, 236, 300, 160, 0.6f); sim.tap(208, 318);
+    sim.wait(2.0f);
+    sim.shot("schwer_geloest");
+    sim.tap(184, 358);
+    sim.game.enterLevel(2);
+    sim.wait(0.6f);
+    sim.shot("schwer_karte");
+    sim.game.setDifficulty(1);
+    sim.game.startLevel(23);
     sim.wait(0.3f);
-    sim.imu.upside = true; sim.wait(1.0f); sim.imu.upside = false;
+    sim.tap(184, 236);
+    sim.wait(10.5f);
     sim.wait(3.0f);
     sim.tap(184, 360);
     sim.wait(0.6f);
@@ -243,6 +284,10 @@ static int window() {
 
 int main(int argc, char** argv) {
   if (argc > 2 && !std::strcmp(argv[1], "--tour")) return tour(argv[2]);
+  if (argc > 1 && !std::strcmp(argv[1], "--voice")) {   // Sätze für tools/mkvoice.py
+    bc::Game::voiceLines([](const char* k, const char* t) { printf("%s\t%s\n", k, t); });
+    return 0;
+  }
 #ifdef WITH_SDL
   return window();
 #else

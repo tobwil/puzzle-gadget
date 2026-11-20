@@ -6,6 +6,10 @@
 #include <ctime>
 
 #include "es8311.h"
+#ifdef BOARD_AMOLED216
+#include "TouchDrvCSTXXX.hpp"
+#include "es7210.h"
+#endif
 
 namespace amoled18 {
 
@@ -13,16 +17,33 @@ namespace amoled18 {
 #define LCD_SDIO1 5
 #define LCD_SDIO2 6
 #define LCD_SDIO3 7
-#define LCD_SCLK 11
 #define LCD_CS 12
+#ifdef BOARD_AMOLED216
+#define LCD_SCLK 38
+#define LCD_RST 39
+#define TP_INT 11
+#define TP_RST 40
+#define I2S_MCK 42
+#else
+#define LCD_SCLK 11
+#define LCD_RST GFX_NOT_DEFINED   // Reset über den IO-Expander
 #define I2S_MCK 16
+#endif
 #define I2S_BCK 9
 #define I2S_DI 10
 #define I2S_WS 45
 #define I2S_DO 8
 
 static Arduino_DataBus* bus_ = new Arduino_ESP32QSPI(LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
-static Arduino_CO5300* panel_ = new Arduino_CO5300(bus_, GFX_NOT_DEFINED, 0, LCD_W, LCD_H, 16, 0, 0, 0);   // Spaltenversatz 16
+#ifdef BOARD_AMOLED216
+static Arduino_CO5300* panel_ = new Arduino_CO5300(bus_, LCD_RST, 0, PANEL_W, PANEL_H, 0, 0, 0, 0);
+static TouchDrvCST92xx touch_;
+static bool touchOk_ = false;
+static volatile bool touchIrq_ = false;
+static void IRAM_ATTR onTouchIrq() { touchIrq_ = true; }
+#else
+static Arduino_CO5300* panel_ = new Arduino_CO5300(bus_, LCD_RST, 0, LCD_W, LCD_H, 16, 0, 0, 0);   // Spaltenversatz 16
+#endif
 static I2SClass i2s_;
 static bool imuOk_ = false;
 
@@ -51,6 +72,25 @@ bool begin() {
   pinMode(PIN_BOOT, INPUT_PULLUP);
   Wire.begin(PIN_SDA, PIN_SCL, 400000);
 
+#ifdef BOARD_AMOLED216
+  bool ok = panel_->begin(80000000);
+  bus_->beginWrite();
+  bus_->writeC8D8(0x36, 0xA0);   // Ausrichtung wie in den Waveshare-Beispielen
+  bus_->endWrite();
+  panel_->setBrightness(0);
+  panel_->fillScreen(0xFFFF);    // Rand um die Spielfläche: weiß wie der Spielhintergrund
+
+  // Touch CST9220: Achsen wie im Waveshare-Beispiel (zum gedrehten Bild passend)
+  touch_.setPins(TP_RST, TP_INT);
+  touchOk_ = touch_.begin(Wire, CST92XX_SLAVE_ADDRESS);
+  if (touchOk_) {
+    touch_.setMaxCoordinates(PANEL_W, PANEL_H);
+    touch_.setSwapXY(true);
+    touch_.setMirrorXY(true, false);
+    pinMode(TP_INT, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(TP_INT), onTouchIrq, FALLING);
+  }
+#else
   // IO-Expander: Display, Touch und Co. aus dem Reset holen
   i2cWriteReg(0x20, 0x03, 0xF8);   // P0..P2 als Ausgang
   i2cWriteReg(0x20, 0x01, 0x00);
@@ -63,6 +103,7 @@ bool begin() {
   panel_->setBrightness(0);
 
   i2cWriteReg(0x15, 0xFE, 0x01);   // Touch: nicht automatisch schlafen
+#endif
 
   // IMU: Softreset (sonst liefert sie alte Werte), dann ±8 g, 1 kHz, Tiefpass 13,37 % ODR
   uint8_t who = 0;
@@ -79,6 +120,30 @@ bool begin() {
   return ok;
 }
 
+#ifdef BOARD_AMOLED216
+bool touchOk() { return touchOk_; }
+
+bool readTouch(bool& down, int16_t& x, int16_t& y) {
+  // Der CST9220 meldet neue Daten per INT; solange ein Finger liegt, wird weiter gelesen, damit das Loslassen ankommt.
+  static bool wasDown = false;
+  if (!touchOk_) return false;
+  if (!touchIrq_ && !wasDown) return false;
+  touchIrq_ = false;
+  int16_t px[1], py[1];
+  const uint8_t n = touch_.getPoint(px, py, 1);
+  down = n > 0;
+  wasDown = down;
+  if (down) {
+    x = px[0] - OFF_X;
+    y = py[0] - OFF_Y;
+    if (x < 0) x = 0; else if (x >= LCD_W) x = LCD_W - 1;
+    if (y < 0) y = 0; else if (y >= LCD_H) y = LCD_H - 1;
+  }
+  return true;
+}
+#else
+bool touchOk() { return true; }
+
 bool readTouch(bool& down, int16_t& x, int16_t& y) {
   uint8_t t[5];
   if (!i2cRead(0x15, 0x02, t, 5)) return false;
@@ -89,6 +154,7 @@ bool readTouch(bool& down, int16_t& x, int16_t& y) {
   }
   return true;
 }
+#endif
 
 bool readAccel(float v[3]) {
   uint8_t d[6];
@@ -108,14 +174,34 @@ bool audioBegin(uint32_t rate, int volume) {
   if (es8311_init(es, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) return false;
   es8311_sample_frequency_config(es, clk.mclk_frequency, clk.sample_frequency);
   es8311_voice_volume_set(es, volume, nullptr);
+#ifdef BOARD_AMOLED216
+  // Mikrofone hängen am ES7210 (Slave, Standard-I2S, 16 Bit); MIC1/MIC2 landen links/rechts auf I2S_DI
+  audio_hal_codec_config_t cfg = {};
+  cfg.adc_input = AUDIO_HAL_ADC_INPUT_ALL;
+  cfg.codec_mode = AUDIO_HAL_CODEC_MODE_ENCODE;
+  cfg.i2s_iface.mode = AUDIO_HAL_MODE_SLAVE;
+  cfg.i2s_iface.fmt = AUDIO_HAL_I2S_NORMAL;
+  cfg.i2s_iface.samples = AUDIO_HAL_16K_SAMPLES;   // passt zu Synth::RATE
+  cfg.i2s_iface.bits = AUDIO_HAL_BIT_LENGTH_16BITS;
+  if (rate != 16000) return false;
+  esp_err_t r = es7210_adc_init(&Wire, &cfg);
+  r |= es7210_adc_config_i2s(cfg.codec_mode, &cfg.i2s_iface);
+  r |= es7210_adc_set_gain((es7210_input_mics_t)(ES7210_INPUT_MIC1 | ES7210_INPUT_MIC2), GAIN_24DB);
+  r |= es7210_adc_ctrl_state(cfg.codec_mode, AUDIO_HAL_CTRL_START);
+  if (r != ESP_OK) return false;
+#else
   es8311_microphone_config(es, false);              // analoges Mikrofon
   es8311_microphone_gain_set(es, ES8311_MIC_GAIN_24DB);
+#endif
   return true;
 }
 
 // ---------------- TF-Karte ----------------
 
 bool sdBegin() {
+#ifdef BOARD_AMOLED216
+  return false;   // TF-Karte läuft dort im SPI-Modus (CS 41); bisher nicht eingebunden
+#endif
   SD_MMC.setPins(2, 1, 3);
   if (!SD_MMC.begin("/sd", true, false, SDMMC_FREQ_DEFAULT, 5)) return false;
   return SD_MMC.cardType() != CARD_NONE;

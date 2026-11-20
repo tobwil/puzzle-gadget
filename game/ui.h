@@ -22,6 +22,7 @@ using dk::Align;
 constexpr Col WHITE = hex(0xFFFFFF), INK = hex(0x121212), BTN = hex(0xE6E6E6), BTN_DOWN = hex(0xCFCFCF);
 constexpr Col CYAN = hex(0x14E6F0), YELLOW = hex(0xFFEE00), PINK = hex(0xFF7ADB), HOTPINK = hex(0xFF2E9E);
 constexpr Col ORANGE = hex(0xF4581F), AMBER = hex(0xFFB000), PURPLE = hex(0x6B2BFF), MINT = hex(0x7BF5C8);
+constexpr Col BLUE = hex(0x2B63F0), RED = hex(0xEE2B2B), GREEN = hex(0x16A84A);
 // Graustufen für die „Foto“-Objekte
 constexpr Col G1 = hex(0xF2F2F2), G2 = hex(0xD9D9D9), G3 = hex(0xB5B5B5), G4 = hex(0x8C8C8C), G5 = hex(0x5E5E5E), G6 = hex(0x333333);
 
@@ -50,6 +51,9 @@ struct Frame {
 };
 
 // ---------------- Level ----------------
+// Was ein Level brauchen könnte (auf der Aufgabenkarte nur in der Stufe „Leicht“ gezeigt)
+enum Tool { TOOL_FINGER = 1, TOOL_SHAKE = 2, TOOL_TILT = 4, TOOL_MIC = 8, TOOL_KNOCK = 16, TOOL_THINK = 32, TOOL_WAIT = 64 };
+
 enum Sfx { SFX_CLICK, SFX_POP, SFX_NOPE, SFX_WIN, SFX_HINT, SFX_WHOOSH, SFX_CRACK, SFX_CHOMP, SFX_SQUEAK, SFX_MAGIC, SFX_WOOF, SFX_HOOT };
 
 struct Host {
@@ -70,10 +74,11 @@ class Level {
   virtual void draw(Scene& s, const Frame& f, int lang) = 0;
   // true: das Level zeichnet (und bewegt) den Aufgabentext selbst
   virtual bool ownsTask() const { return false; }
+  virtual int tools() const { return TOOL_FINGER; }
   bool solved = false;
 };
 
-constexpr int LEVELS = 12;
+constexpr int LEVELS = 24;
 Level* makeLevel(int i);   // 0 .. LEVELS-1
 
 // ---------------- Layout ----------------
@@ -104,7 +109,7 @@ void iconBack(Scene& s, float x, float y, Col c);
 void iconSkip(Scene& s, float x, float y, Col c);
 void iconRestart(Scene& s, float x, float y, Col c);
 void iconBulb(Scene& s, float x, float y, float k, Col c);
-void iconSpeaker(Scene& s, float x, float y, bool on, Col c);
+void iconSpeaker(Scene& s, float x, float y, int level, Col c);   // level 0 = stumm, 1..3 Wellen
 void iconGrid(Scene& s, float x, float y, Col c);
 
 // Figuren (Graustufen wie Fotos). k = Größe (1 = normal)

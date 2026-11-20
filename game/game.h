@@ -17,17 +17,24 @@ class Game : Host {
 
   int brightness() const { return bright_; }   // 0..255
   bool screenOff() const { return off_; }
-  void startLevel(int i);   // für Tests und den seriellen Befehl „level N“
+  void startLevel(int i);   // für Tests und den seriellen Befehl „level N“ (ohne Aufgabenkarte)
+  void enterLevel(int i);   // mit Aufgabenkarte (und vorgelesener Aufgabe)
   void resetProgress();
   const char* debug();
+  // Alle Sätze der Sprachausgabe (Schlüssel wie bei Speaker::speak, Text), für tools/mkvoice.py
+  static void voiceLines(void (*out)(const char* key, const char* text));
   uint32_t doneMask() const { return done_; }
   int hints() const { return hints_; }
   void setLang(int l) { lang_ = l & 1; }
+  void skipIntro() { if (screen_ == INTRO) screen_ = TITLE; }
+  int difficulty() const { return diff_; }
+  void setDifficulty(int d) { diff_ = (d % 3 + 3) % 3; store_.set("bc_diff", diff_); }
   dk::Motion motion;
+  dk::Speaker* speaker = nullptr;
 
  private:
-  enum Screen { TITLE, PICK, PLAY, END };
-  enum Overlay { NONE, HINT, SKIP, SOLVED };
+  enum Screen { TITLE, PICK, PLAY, END, INTRO };
+  enum Overlay { NONE, HINT, SKIP, SOLVED, TASK };
 
   // Host
   void solve() override;
@@ -42,11 +49,16 @@ class Game : Host {
   void drawLevels(Scene& s);
   void drawEnd(Scene& s);
   void drawOverlay(Scene& s);
+  void drawIntro(Scene& s);
+  void drawTaskCard(Scene& s, float a);
+  void speak(const char* what);
+  int skipCost() const { return diff_ == 0 ? 1 : 3; }
+  float playTime() const { return solvedAt_ >= 0 ? solvedAt_ : levelT_; }
   bool isDone(int i) const { return (done_ >> i) & 1; }
   bool unlocked(int i) const { return i == 0 || isDone(i) || isDone(i - 1); }
   int nextLevel() const;
   void save();
-  void setSound(bool on);
+  void setVolume(int v);
 
   dk::Synth& synth_;
   dk::Store& store_;
@@ -58,6 +70,10 @@ class Game : Host {
   uint32_t done_ = 0, hintUsed_ = 0;
   int hints_ = 15, lang_ = 0;
   bool sound_ = true;
+  int vol_ = 2, diff_ = 1, introPage_ = 0, pickPage_ = 0;
+  bool autoHinted_ = false, newBest_ = false;
+  int bestT_ = 0;   // Bestzeit des aktuellen Levels in Zehntelsekunden (0 = keine)
+  float lastNopeVoice_ = -10;
   float levelT_ = 0, solvedAt_ = -1, now_ = 0;
   const char* praise_ = "NICE!";
   int praiseN_ = 0;

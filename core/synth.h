@@ -26,6 +26,9 @@ class Synth {
   void render(int16_t* out, int n);   // Mono, 16 Bit
   void play(const Voice& v);
   void setVolume(float v) { std::lock_guard<std::mutex> l(m_); master_ = v; }
+  // Sprach-Clip abspielen (G.711 µ-law, RATE Hz, mono); ersetzt einen laufenden Clip. data muss gültig bleiben.
+  void playClip(const uint8_t* data, uint32_t n, float vol = 0.9f);
+  bool clipPlaying() const { return clip_ != nullptr; }
   float volume() const { return master_; }
   uint32_t rnd();
 
@@ -40,6 +43,9 @@ class Synth {
   std::mutex m_;
   Slot s_[14];
   float master_ = 0;
+  const uint8_t* clip_ = nullptr;
+  uint32_t clipN_ = 0, clipPos_ = 0;
+  float clipVol_ = 0;
   uint32_t seed_ = 0x1234567;
 };
 

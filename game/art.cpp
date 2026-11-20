@@ -118,12 +118,11 @@ void iconBulb(Scene& s, float x, float y, float k, Col c) {
   s.rrect(x - 3.5f * k, y + 17 * k, 7 * k, 2.5f * k, 1.2f * k, c);
 }
 
-void iconSpeaker(Scene& s, float x, float y, bool on, Col c) {
+void iconSpeaker(Scene& s, float x, float y, int level, Col c) {
   s.rrect(x - 12, y - 5, 8, 10, 2, c);
   tri(s, x - 6, y, x + 2, y - 11, x + 2, y + 11, c);
-  if (on) {
-    s.arc(x + 4, y, 8, 3, 0.7f, 2.45f, c);
-    s.arc(x + 4, y, 14, 3, 0.75f, 2.4f, c);
+  if (level > 0) {
+    for (int i = 0; i < 3; i++) s.arc(x + 4, y, 7 + i * 6, 2.6f, 0.75f, 2.4f, c, i < level ? 1.f : 0.18f);
   } else {
     s.capsule(x + 7, y - 6, x + 17, y + 6, 1.8f, c);
     s.capsule(x + 17, y - 6, x + 7, y + 6, 1.8f, c);

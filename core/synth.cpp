@@ -65,6 +65,18 @@ float Synth::sample(Slot& sl, float dt) {
   return s * g * v.vol;
 }
 
+static float ulaw(uint8_t u) {
+  u = ~u;
+  const int sign = u & 0x80, exp = (u >> 4) & 7, man = u & 0x0F;
+  const int v = (((man << 3) + 0x84) << exp) - 0x84;
+  return (sign ? -v : v) / 32768.f;
+}
+
+void Synth::playClip(const uint8_t* data, uint32_t n, float vol) {
+  std::lock_guard<std::mutex> l(m_);
+  clip_ = data; clipN_ = n; clipPos_ = 0; clipVol_ = vol;
+}
+
 void Synth::render(int16_t* out, int n) {
   std::lock_guard<std::mutex> l(m_);
   const float dt = 1.f / RATE;
@@ -72,6 +84,10 @@ void Synth::render(int16_t* out, int n) {
     float s = 0;
     for (auto& sl : s_)
       if (sl.on) s += sample(sl, dt);
+    if (clip_) {
+      s += ulaw(clip_[clipPos_++]) * clipVol_;
+      if (clipPos_ >= clipN_) clip_ = nullptr;
+    }
     s *= master_;
     s = s * (27.f + s * s) / (27.f + 9.f * s * s);   // weiche Begrenzung
     if (s > 1) s = 1;

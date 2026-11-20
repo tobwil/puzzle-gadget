@@ -18,6 +18,11 @@ struct Input {
   float voice = 0;         // Mikrofonpegel 0..1 (geglättet), 0 = kein Mikrofon
 };
 
+struct Speaker {   // Sprachausgabe: spielt einen vorab erzeugten Clip, z. B. "de_t05" (Aufgabe 5), "en_p2" (Lob 2)
+  virtual void speak(const char* key) = 0;
+  virtual ~Speaker() = default;
+};
+
 struct Store {   // dauerhafte Werte (NVS auf dem Gerät, Datei im Simulator)
   virtual int get(const char* key, int def) = 0;
   virtual void set(const char* key, int v) = 0;
