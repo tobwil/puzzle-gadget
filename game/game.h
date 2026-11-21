@@ -47,6 +47,11 @@ class Game : Host {
   void resetAll();       // alle drei Modi auf 0, Intro wieder von vorn
   bool takePowerOff() { const bool p = powerReq_; powerReq_ = false; return p; }   // Ausschalten aus dem Menü (Firmware fragt ab)
   int brightLevel() const { return brightIdx_; }
+  // Akku (vom Gerät; pct = -1: unbekannt). Sparmodus ab 20 % ohne Kabel (bis 25 %): Helligkeit gedeckelt,
+  // Display früher dunkel und aus; bei 10 % eine Warnung.
+  void setBattery(int pct, bool charging, bool usb);
+  bool saving() const { return saving_; }
+  int battery() const { return batPct_; }
   void skipWho() { if (screen_ == WHO) screen_ = store_.get("bc_intro", 0) ? TITLE : INTRO; }
   dk::Motion motion;
   dk::Speaker* speaker = nullptr;
@@ -71,6 +76,7 @@ class Game : Host {
   void drawIntro(Scene& s);
   void drawWho(Scene& s);
   void drawSettings(Scene& s);
+  void drawBattery(Scene& s, float x, float y, bool text);
   void tapSettings(float x, float y);
   void loadProgress();
   const char* key(const char* name) const;   // Speicherschlüssel des aktuellen Modus („bc_…“ bzw. „bk_…“)
@@ -103,6 +109,10 @@ class Game : Host {
   int brightIdx_ = 2, settingsBack_ = 0, confirm_ = -1;
   float confirmT_ = -10;
   bool swiped_ = false, powerReq_ = false;
+  // Akku
+  int batPct_ = -1;
+  bool batChg_ = false, batUsb_ = false, saving_ = false, warned_ = false;
+  float warnT_ = -10;
   int whoBack_ = -1, whoBackOverlay_ = 0;   // wohin es nach „Wer spielt?“ zurückgeht (-1: zum Titel)
   mutable char key_[16];
   Screen screen_ = WHO;

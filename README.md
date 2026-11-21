@@ -170,6 +170,18 @@ Tipps: Am Anfang gibt es 15, jedes erstmals gelöste Level bringt einen dazu. Ei
 
 Nach 90 s ohne Berührung wird das Display dunkler, nach 4 min geht es aus. Ein Tipp weckt es wieder (dieser erste Tipp zählt nicht als Spielzug).
 
+## Akku und Stromsparen
+
+Der Akkustand (Ladestandsmessung des AXP2101) steht oben links auf dem Titelbild, bei „Wer spielt?“ und in den Einstellungen; im Spiel erscheint er nur, wenn er knapp wird (rot ab 20 %). Am Kabel ist die Füllung grün, beim Laden mit Blitz. Übernommen aus esp-gadget/esp-kids, soweit hier sinnvoll (WLAN, Nachtruhe und Ähnliches gibt es hier nicht):
+
+- **Sparmodus** ab 20 % ohne Kabel (aus über 25 %): höchstens ≈ 40 % Helligkeit, Display nach 30 s dunkler und nach 90 s aus.
+- **Warnung** bei 10 % (Banner „bitte bald laden“), bei 3 % und unter 3,4 V schaltet das Gerät nach 20 s geordnet aus.
+- **Ausschalten nach langer Pause:** 10 min mit dunklem Display (Sparmodus: 3 min) und nicht am Kabel → aus über den PMU. Einschalten mit der Power-Taste; Spielstände bleiben.
+- **Dunkles Display:** Prozessor auf 80 statt 240 MHz, 10 statt 30 Durchläufe je Sekunde; nur geänderte Bildstreifen gehen ans Panel.
+- **Verstärker** (PA_EN) nur an, solange etwas klingt (2 s Nachlauf).
+
+Die Ladestandsmessung ist erst seit dieser Version eingeschaltet und braucht ein, zwei Ladezyklen, bis die Prozente genau sind.
+
 **Tasten (AMOLED-2.16):**
 
 | Taste | Wirkung |
@@ -203,13 +215,14 @@ Serielle Befehle (115200 Baud, `pio device monitor`):
 
 | Befehl | Wirkung |
 |---|---|
-| `status` | Bildschirm, Level, gelöste Level, Tipps, Neigung, Mikrofonpegel |
+| `status` | Bildschirm, Level, gelöste Level, Tipps, Neigung, Mikrofonpegel, Akku, Sparmodus, Prozessortakt |
 | `level N` | Level N starten (Erwachsen 1–36, Kind 1–48, Klein 1–36) |
 | `stufe N` | Schwierigkeit: 0 leicht, 1 normal, 2 schwer |
 | `laut N` | Lautstärke 0 (stumm) bis 3 |
 | `modus klein`, `modus kind`, `modus erwachsen` | Altersstufe wählen |
 | `menu` | Einstellungen öffnen |
 | `zufall` | Zufallsmodus starten (gibt die Lösung aus) |
+| `taste` | wie Power-Taste kurz (Display aus/an) |
 | `mikro` | Spitzenpegel des Mikrofons seit dem letzten Aufruf |
 | `sag KEY` | Sprach-Clip abspielen, z. B. `sag de_t05` |
 | `tipp X Y`, `wisch X0 Y0 X1 Y1` | Berührung nachstellen |

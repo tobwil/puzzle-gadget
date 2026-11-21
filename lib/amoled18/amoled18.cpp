@@ -44,6 +44,8 @@ static TouchDrvCST92xx touch_;
 static bool touchOk_ = false;
 static XPowersPMU pmu_;
 static bool pmuOk_ = false;
+static Battery bat_;
+static portMUX_TYPE batMux_ = portMUX_INITIALIZER_UNLOCKED;
 #else
 static Arduino_CO5300* panel_ = new Arduino_CO5300(bus_, LCD_RST, 0, LCD_W, LCD_H, 16, 0, 0, 0);   // Spaltenversatz 16
 #endif
@@ -93,6 +95,11 @@ bool begin() {
     pmu_.setLongPressPowerOFF();
     pmu_.enableLongPressShutdown();
     pmu_.setPowerKeyPressOffTime(XPOWERS_POWEROFF_6S);
+    // Akku: Erkennung, Spannungsmessung und Ladestandsmessung (Fuel Gauge) an
+    pmu_.enableBattDetection();
+    pmu_.enableBattVoltageMeasure();
+    pmu_.enableVbusVoltageMeasure();
+    pmu_.enableGauge();
   }
   pinMode(KEY3, INPUT_PULLUP);
 
@@ -157,7 +164,34 @@ Button pollButtons() {
     else if (pmu_.isPekeyShortPressIrq()) ev = Button::ScreenToggle;
     pmu_.clearIrqStatus();
   }
+  // Akku alle 2 s (im selben Task, damit sich keine I²C-Zugriffe überschneiden)
+  static uint32_t lastBat = 0;
+  if (pmuOk_ && (!lastBat || millis() - lastBat >= 2000)) {
+    lastBat = millis();
+    Battery b;
+    b.usb = pmu_.isVbusIn();
+    b.charging = pmu_.isCharging();
+    if (pmu_.isBatteryConnect()) {
+      const int p = pmu_.getBatteryPercent();
+      b.pct = p >= 0 && p <= 100 ? p : -1;
+      b.mv = pmu_.getBattVoltage();
+    }
+    // Beim Laden meldet der AXP2101 den Akku manchmal kurz als fehlend: letzten Wert 30 s halten
+    static uint32_t validAt = 0;
+    if (b.pct >= 0) validAt = millis();
+    else if (millis() - validAt < 30000) { b.pct = bat_.pct; b.mv = bat_.mv; }
+    portENTER_CRITICAL(&batMux_);
+    bat_ = b;
+    portEXIT_CRITICAL(&batMux_);
+  }
   return ev;
+}
+
+Battery battery() {
+  portENTER_CRITICAL(&batMux_);
+  const Battery b = bat_;
+  portEXIT_CRITICAL(&batMux_);
+  return b;
 }
 
 bool touchOk() { return touchOk_; }
@@ -198,6 +232,7 @@ bool readTouch(bool& down, int16_t& x, int16_t& y) {
 bool pmuOk() { return false; }
 void powerOff() {}
 Button pollButtons() { return Button::Idle; }
+Battery battery() { return {}; }
 
 bool touchOk() { return true; }
 
@@ -219,6 +254,8 @@ bool readAccel(float v[3]) {
   for (int i = 0; i < 3; i++) v[i] = int16_t(d[2 * i] | (d[2 * i + 1] << 8)) / 4096.f;   // ±8 g
   return true;
 }
+
+void amp(bool on) { digitalWrite(PIN_PA_EN, on ? HIGH : LOW); }
 
 bool audioBegin(uint32_t rate, int volume) {
   pinMode(PIN_PA_EN, OUTPUT);

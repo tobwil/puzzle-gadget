@@ -49,6 +49,10 @@ enum class Button : uint8_t { Idle, ScreenToggle, PowerOff };
 Button pollButtons();
 void powerOff();   // Gerät über den PMU ausschalten (einschalten: Power-Taste)
 bool pmuOk();
+// Akku über die Ladestandsmessung des AXP2101 (pollButtons liest ihn alle 2 s). pct = -1: unbekannt/kein Akku
+struct Battery { int pct = -1, mv = 0; bool charging = false, usb = false; };
+Battery battery();
+void amp(bool on);   // Lautsprecher-Verstärker (PA_EN): aus, solange nichts zu hören ist
 
 // TF-Karte: SDMMC 1-Bit (CLK 2, CMD 1, D0 3, laut Waveshare-Beispiel), eingehängt unter /sd. false = keine Karte
 bool sdBegin();

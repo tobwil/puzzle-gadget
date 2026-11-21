@@ -72,6 +72,14 @@ static float ulaw(uint8_t u) {
   return (sign ? -v : v) / 32768.f;
 }
 
+bool Synth::busy() {
+  std::lock_guard<std::mutex> l(m_);
+  if (master_ <= 0) return false;
+  if (clip_) return true;
+  for (auto& sl : s_) if (sl.on) return true;
+  return false;
+}
+
 void Synth::playClip(const uint8_t* data, uint32_t n, float vol) {
   std::lock_guard<std::mutex> l(m_);
   clip_ = data; clipN_ = n; clipPos_ = 0; clipVol_ = vol;

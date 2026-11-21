@@ -480,6 +480,26 @@ static int tour(const char* dir) {
     sim.wait(0.3f);
     if (std::strncmp(sim.game.debug(), "screen 5", 8) || sim.game.doneMask() != 0) { printf("Zurücksetzen: %s\n", sim.game.debug()); fails++; }
     if (sim.game.brightLevel() != 3) { printf("Helligkeit: %d\n", sim.game.brightLevel()); fails++; }
+    // ---- Akku: Anzeige, Sparmodus, Warnung bei 10 % ----
+    sim.game.setBattery(76, true, true);
+    sim.wait(0.2f);
+    sim.shot("akku_laden_wer");
+    sim.game.setBattery(8, false, false);
+    sim.wait(0.5f);
+    sim.shot("akku_warnung");
+    if (!sim.game.saving()) { printf("Sparmodus bei 8 %% nicht an\n"); fails++; }
+    sim.tap(184, 230);   // Kind
+    sim.wait(4.0f);
+    sim.shot("akku_titel");
+    sim.drag(184, 10, 184, 200, 0.4f);
+    sim.wait(0.3f);
+    sim.shot("akku_einstellungen");
+    sim.tap(184, 400);
+    sim.game.startLevel(0);
+    sim.wait(0.3f);
+    sim.tap(184, 358);
+    sim.shot("akku_im_spiel");
+    sim.game.setBattery(-1, false, false);
   }
   printf("%d Level nicht gelöst, %d Textprobleme\n", fails, nIssues);
   return fails || nIssues ? 1 : 0;

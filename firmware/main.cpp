@@ -14,6 +14,7 @@
 //   modus X        X = klein (16 Level, unter 5), kind (24 Level, 6–9) oder erwachsen (36 Level)
 //   menu           Einstellungen öffnen
 //   zufall         Zufallsmodus starten
+//   taste          wie Power-Taste kurz: Display aus/an
 //   sag KEY        Sprach-Clip abspielen, z. B. „sag de_t05“
 //   reset          Spielstand löschen (Level, Tipps)
 //   log            Zwei-Sekunden-Protokoll (fps, Zeiten) ein/aus
@@ -151,9 +152,19 @@ static uint32_t hashBand(const uint16_t* p, int n) {
 }
 
 // ---------------- Audio und Mikrofonpegel (Kern 0) ----------------
+// Der Verstärker (PA_EN) läuft nur, solange etwas klingt, und geht 2 s danach aus (spart im Ruhezustand Strom).
 static void audioTask(void*) {
   static int16_t mono[256], stereo[512];
+  bool ampOn = true;
+  uint32_t quietAt = millis();
   for (;;) {
+    if (synth.busy()) {
+      quietAt = millis();
+      if (!ampOn) { hw::amp(true); ampOn = true; }
+    } else if (ampOn && millis() - quietAt > 2000) {
+      hw::amp(false);
+      ampOn = false;
+    }
     synth.render(mono, 256);
     for (int i = 0; i < 256; i++) stereo[2 * i] = stereo[2 * i + 1] = mono[i];
     hw::i2s().write(reinterpret_cast<uint8_t*>(stereo), sizeof stereo);
@@ -207,6 +218,9 @@ static void pollSerial() {
       Serial.printf("mikrofon %.1f dBFS (spitze %.1f), pegel %.2f, imu %s, touch %s\n", float(micDb), float(micPeak), float(voiceLevel), hw::imuOk() ? "ok" : "fehlt", hw::touchOk() ? "ok" : "fehlt");
       Serial.printf("finger %s %d %d, aufgesetzt %d mal, display %s, pmu %s\n", touchDown ? "liegt" : "weg", int(touchX), int(touchY),
                     int(touchPresses), panelWant ? "an" : "aus (Taste)", hw::pmuOk() ? "ok" : "fehlt");
+      const hw::Battery b = hw::battery();
+      Serial.printf("akku %d %%, %d mV, %s%s, sparmodus %s, cpu %lu MHz\n", b.pct, b.mv, b.usb ? "usb" : "akku", b.charging ? ", lädt" : "",
+                    game->saving() ? "an" : "aus", (unsigned long)getCpuFrequencyMhz());
     } else if (sscanf(line, "level %d", &a) == 1) {
       game->startLevel(a - 1);
       Serial.printf("level %d\n", a);
@@ -236,6 +250,8 @@ static void pollSerial() {
     } else if (!strcmp(line, "mikro")) {   // Spitzenpegel seit dem letzten Aufruf (zum Einstellen der Schwellen)
       Serial.printf("mikrofon spitze %.1f dBFS, jetzt %.1f dBFS, pegel %.2f\n", float(micPeak), float(micDb), float(voiceLevel));
       micPeak = -120;
+    } else if (!strcmp(line, "taste")) {   // wie Power-Taste kurz (Display aus/an)
+      buttonEvent = int(hw::Button::ScreenToggle);
     } else if (!strcmp(line, "zufall")) {
       game->startRandom();
       Serial.printf("zufall: %s\n", game->levelAnswer() ? game->levelAnswer() : "-");
@@ -292,7 +308,26 @@ void loop() {
   // Tasten: Display aus/an (Spiel pausiert, Touch wird ignoriert) und Ausschalten
   static bool forcedOff = false;
   const int be = buttonEvent;
-  const bool menuOff = game->takePowerOff();   // Ausschalten aus dem Einstellungsmenü
+  // Akku: ans Spiel (Anzeige, Sparmodus, Warnung); bei 3 % ohne Kabel 20 s lang: geordnet ausschalten.
+  // Zusätzlich unter 3,4 V: die Ladestandsmessung muss sich nach dem Einschalten erst einlernen und darf
+  // nicht allein abschalten.
+  const hw::Battery bat = hw::battery();
+  game->setBattery(bat.pct, bat.charging, bat.usb);
+  static uint32_t emptySince = 0;
+  if (bat.pct >= 0 && bat.pct <= 3 && bat.mv > 0 && bat.mv < 3400 && !bat.usb) { if (!emptySince) emptySince = millis(); }
+  else emptySince = 0;
+  // Lange dunkel (Taste oder Zeitablauf) und nicht am Kabel: ganz ausschalten. Einschalten: Power-Taste.
+  static uint32_t darkSince = 0;
+  const bool dark = forcedOff || game->screenOff();
+  if (!dark || bat.usb) darkSince = 0;
+  else if (!darkSince) darkSince = millis();
+  const uint32_t idleOffMs = (game->saving() ? 3 : 10) * 60000UL;
+  const bool autoOff = hw::pmuOk() && ((emptySince && millis() - emptySince > 20000) || (darkSince && millis() - darkSince > idleOffMs));
+  if (autoOff) Serial.println(emptySince ? "akku leer" : "lange dunkel");
+  // Dunkel: Prozessor auf 80 MHz (Peripherie läuft mit 80 MHz APB unverändert weiter), hell: 240 MHz
+  static bool slow = false;
+  if (dark != slow) { slow = dark; setCpuFrequencyMhz(dark ? 80 : 240); }
+  const bool menuOff = game->takePowerOff() || autoOff;   // Ausschalten aus dem Einstellungsmenü oder automatisch
   if (be || menuOff) {
     buttonEvent = 0;
     const int ev = menuOff ? int(hw::Button::PowerOff) : be;
@@ -402,7 +437,7 @@ pace:
   } else if (!logOn && millis() - lastLog > 2000) {
     lastLog = millis(); frames = 0; tickUs = 0; rasterUs = 0;
   }
-  next += 33;
+  next += game->screenOff() ? 100 : 33;   // dunkel: 10 Durchläufe je Sekunde reichen (Touch weckt)
   const int32_t wait = int32_t(next - millis());
   if (wait > 0) delay(wait);
   else next = millis();

@@ -15,6 +15,8 @@ constexpr float TB_Y = 356, TB_H = 56, TP_X = 30, TP_W = 176, TD_X = 216, TG_X =
 constexpr float VOLS[4] = {0, 0.25f, 0.55f, 1.0f};
 
 constexpr uint32_t DIM_MS = 90000, OFF_MS = 240000;
+constexpr uint32_t DIM_MS_SAVE = 30000, OFF_MS_SAVE = 90000;   // Sparmodus (Akku unter 20 %)
+constexpr int BRIGHT_SAVE = 100;                               // Sparmodus: höchstens so hell (≈ 40 %)
 constexpr int BRIGHT_DIM = 40;
 constexpr int BRIGHTS[4] = {50, 100, 170, 255};   // Helligkeitsstufen im Menü
 
@@ -56,6 +58,7 @@ const Txt T_WHOSAY{"Who is playing? A little one, a child or an adult?", "Wer sp
 const Txt T_SET{"SETTINGS", "EINSTELLUNGEN"}, T_BRIGHT{"Brightness", "Helligkeit"}, T_VOL{"Volume", "Lautstärke"}, T_LANGROW{"Language", "Sprache"};
 const Txt T_WHOROW{"Who is playing?", "Wer spielt?"}, T_RESETALL{"Reset everything to 0", "Alles auf 0 zurücksetzen"}, T_POWER{"Power off", "Ausschalten"};
 const Txt T_SURE{"Sure? Tap again!", "Wirklich? Nochmal tippen!"}, T_DONE{"DONE", "FERTIG"};
+const Txt T_LOWBAT{"Battery 10 % – please charge soon", "Akku 10 % – bitte bald laden"};
 const Txt T_RANDOM{"RANDOM", "ZUFALL"}, T_STREAK{"STREAK %d", "SERIE %d"}, T_RECORDS{"Record %d", "Rekord %d"}, T_NEWREC{"NEW RECORD: %d!", "NEUER REKORD: %d!"};
 // Einstellungen: Zeilen
 constexpr float SR_Y = 64, SR_H = 44, SR_STEP = 50;
@@ -121,6 +124,33 @@ void Game::askWho() {
   overlay_ = NONE;
   screen_ = WHO;
   whoSpoken_ = false;
+}
+
+void Game::setBattery(int pct, bool charging, bool usb) {
+  batPct_ = pct; batChg_ = charging; batUsb_ = usb;
+  saving_ = pct >= 0 && !usb && (pct <= 20 || (saving_ && pct <= 25));
+  if (usb || pct > 15) warned_ = false;
+  if (pct >= 0 && pct <= 10 && !usb && !warned_) { warned_ = true; warnT_ = now_; sfx(SFX_HINT); }
+}
+
+void Game::drawBattery(Scene& s, float x, float y, bool text) {
+  if (batPct_ < 0) return;
+  // Gehäuse 26 × 13 mit Pol, Füllung nach Ladestand (rot ab 20 %), Blitz beim Laden
+  const Col c = batPct_ <= 20 && !batUsb_ ? RED : INK;
+  s.rrect(x, y, 26, 13, 3.5f, c);
+  s.rrect(x + 1.8f, y + 1.8f, 22.4f, 9.4f, 2, WHITE);
+  s.rrect(x + 26.5f, y + 4, 2.5f, 5, 1, c);
+  const float w = 19.6f * clampf(batPct_ / 100.f, 0.06f, 1);
+  s.rrect(x + 3.2f, y + 3.2f, w, 6.6f, 1.2f, batUsb_ ? GREEN : c);
+  if (batChg_ || batUsb_) {
+    tri(s, x + 14, y - 1, x + 9, y + 7.5f, x + 13.5f, y + 7.5f, YELLOW);
+    tri(s, x + 12.5f, y + 5.5f, x + 17, y + 5.5f, x + 12, y + 14, YELLOW);
+  }
+  if (text) {
+    char b[8];
+    std::snprintf(b, sizeof b, "%d%%", batPct_);
+    s.text(fonts::label, b, x + 34, y - 3, c);
+  }
 }
 
 void Game::showHint() {
@@ -393,8 +423,10 @@ void Game::tick(const dk::Input& in) {
   const bool isTap = released && dist(x_, y_, sx_, sy_) < 22 && in.ms - downMs_ < 600;
 
   // Energie: nach 90 s dunkler, nach 4 min aus
-  if (in.ms - lastActive_ > OFF_MS) off_ = true;
-  bright_ = off_ ? 0 : in.ms - lastActive_ > DIM_MS ? std::min(BRIGHT_DIM, BRIGHTS[brightIdx_]) : BRIGHTS[brightIdx_];
+  const uint32_t offMs = saving_ ? OFF_MS_SAVE : OFF_MS, dimMs = saving_ ? DIM_MS_SAVE : DIM_MS;
+  if (in.ms - lastActive_ > offMs) off_ = true;
+  const int full = saving_ ? std::min(BRIGHT_SAVE, BRIGHTS[brightIdx_]) : BRIGHTS[brightIdx_];
+  bright_ = off_ ? 0 : in.ms - lastActive_ > dimMs ? std::min(BRIGHT_DIM, full) : full;
 
   motion.feed(in.acc, in.nAcc, down_ || released);
   if (motion.shaking || in.voice > 0.4f) lastActive_ = in.ms;
@@ -697,6 +729,7 @@ void Game::drawTitle(Scene& s) {
   // Wechsel-Symbol: zwei Pfeile
   s.capsule(138, 254, 150, 254, 1.6f, INK); s.capsule(146, 250, 150, 254, 1.6f, INK);
   s.capsule(138, 264, 150, 264, 1.6f, INK); s.capsule(138, 264, 142, 268, 1.6f, INK);
+  drawBattery(s, 30, 27, true);
   // oben rechts: Anleitung, Ton und Sprache
   s.circle(184, 35, 17, BTN);
   s.text(fonts::heavy, "?", 184, 18, INK, 1, Align::Center);
@@ -904,7 +937,8 @@ void Game::drawWho(Scene& s) {
     std::snprintf(b, sizeof b, "%d %s", m == SMALL ? SMALL_LEVELS : m == KID ? KID_LEVELS : LEVELS, lang_ ? "Level" : "levels");
     s.text(fonts::label, b, cx, 304, G4, 1, Align::Center);
   }
-  sparkle(s, 44, 56, 9, INK, 1, t);
+  drawBattery(s, 40, 27, true);
+  sparkle(s, 30, 70, 8, INK, 1, t);
   sparkle(s, 326, 70, 8, CYAN, 1, t + 1);
   textWrap(s, fonts::label, tr(T_WHOLATER, lang_), W / 2, 366, 280, G4);
 }
@@ -945,6 +979,7 @@ void Game::drawSettings(Scene& s) {
   }
   s.rrect(W / 2 - 80, 376, 160, 48, 24, INK);
   s.text(fonts::heavy, tr(T_DONE, lang_), W / 2, 384, WHITE, 1, Align::Center);
+  drawBattery(s, 24, 394, true);
 }
 
 void Game::drawIntro(Scene& s) {
@@ -1007,6 +1042,12 @@ void Game::draw(Scene& s) {
   }
   if (overlay_ != NONE) drawOverlay(s);
   else s.capsule(W / 2 - 16, 7, W / 2 + 16, 7, 2.5f, G2);   // Griff: hier lässt sich das Menü herunterwischen
+  if (screen_ == PLAY && overlay_ == NONE && batPct_ >= 0 && batPct_ <= 20 && !batUsb_) drawBattery(s, W / 2 + 26, 2, false);   // im Spiel nur, wenn knapp
+  if (now_ - warnT_ < 4) {   // Warnung bei 10 %
+    const float a = clampf((4 - (now_ - warnT_)) * 2, 0, 1);
+    s.rrect(24, 54, W - 48, 40, 14, HOTPINK, a);
+    s.text(fonts::label, tr(T_LOWBAT, lang_), W / 2, 66, WHITE, a, Align::Center);
+  }
 }
 
 void Game::voiceLines(void (*out)(const char* key, const char* text)) {
@@ -1050,7 +1091,7 @@ void Game::voiceLines(void (*out)(const char* key, const char* text)) {
 
 const char* Game::debug() {
   std::snprintf(dbg_, sizeof dbg_, "screen %d modus %s%s level %d overlay %d solved 0x%09llx hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
-                int(screen_), mode_ == KID ? "kind" : mode_ == SMALL ? "klein" : "erwachsen", endless_ ? " zufall" : "", cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_,
+                int(screen_), mode_ == KID ? "kind" : mode_ == SMALL ? "klein" : "erwachsen", endless_ ? (saving_ ? " zufall spar" : " zufall") : saving_ ? " spar" : "", cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_,
                 motion.tiltX, motion.tiltY, motion.tiltZ);
   return dbg_;
 }

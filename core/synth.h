@@ -29,6 +29,7 @@ class Synth {
   // Sprach-Clip abspielen (G.711 µ-law, RATE Hz, mono); ersetzt einen laufenden Clip. data muss gültig bleiben.
   void playClip(const uint8_t* data, uint32_t n, float vol = 0.9f);
   bool clipPlaying() const { return clip_ != nullptr; }
+  bool busy();   // klingt gerade etwas (Stimme oder Clip, Lautstärke > 0)? Sonst darf der Verstärker aus
   float volume() const { return master_; }
   uint32_t rnd();
 
