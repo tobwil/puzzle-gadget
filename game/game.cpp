@@ -387,7 +387,7 @@ void Game::tick(const dk::Input& in) {
       f.tiltX = motion.tiltX; f.tiltY = motion.tiltY; f.tiltZ = motion.tiltZ;
       f.shaking = motion.shaking; f.shake = motion.shake;
       f.knocks = motion.nKnocks;
-      f.voice = in.voice;
+      f.voice = levelT_ > 1.0f ? in.voice : 0;   // direkt nach LOS noch nicht hinhören
     }
     l->tick(f, *this);
     if (l->solved && overlay_ == NONE && levelT_ - solvedAt_ > 1.1f) { overlay_ = SOLVED; overlayT_ = 0; sfx(SFX_WIN); }
@@ -504,7 +504,7 @@ void Game::tap(float x, float y) {
       break;
     case PICK:
       if (y < 72 && x < 80) { screen_ = TITLE; sfx(SFX_CLICK); break; }
-      if (y > 382) { pickPage_ = clampf(int((x - (W / 2 - pages() * 52)) / 104), 0, pages() - 1); sfx(SFX_CLICK); break; }
+      if (y > 382) { const float pw = pageW() + 8; pickPage_ = clampf(int((x - (W / 2 - pages() * pw / 2)) / pw), 0, pages() - 1); sfx(SFX_CLICK); break; }
       for (int k = 0; k < 12; k++) {
         const int i = pickPage_ * 12 + k;
         const float tx = TX0 + (k % 3) * (TW + TGX), ty = TY0 + (k / 3) * (TH + TGY);
@@ -629,13 +629,14 @@ void Game::drawLevels(Scene& s) {
   s.capsule(W / 2 - tw / 2 - 3, HEAD_Y + 5, W / 2 + tw / 2 + 3, HEAD_Y + 3, 8, YELLOW);
   s.text(fonts::heavy, tr(T_LEVELS, lang_), W / 2, HEAD_Y - 18, INK, 1, Align::Center);
   const int next = nextLevel();
+  const float pw = pageW();
   for (int p = 0; p < pages(); p++) {   // Seitenwahl unten
     const bool on = p == pickPage_;
-    const float bx = W / 2 - pages() * 52 + 4 + p * 104;
+    const float bx = W / 2 - pages() * (pw + 8) / 2 + 4 + p * (pw + 8);
     char pb[16];
-    std::snprintf(pb, sizeof pb, "%d – %d", p * 12 + 1, std::min(levelCount(), p * 12 + 12));
-    s.rrect(bx, 390, 96, 36, 18, on ? INK : BTN);
-    s.text(fonts::label, pb, bx + 48, 399, on ? WHITE : INK, 1, Align::Center);
+    std::snprintf(pb, sizeof pb, pages() > 3 ? "%d–%d" : "%d – %d", p * 12 + 1, std::min(levelCount(), p * 12 + 12));
+    s.rrect(bx, 390, pw, 36, 18, on ? INK : BTN);
+    s.text(fonts::label, pb, bx + pw / 2, 399, on ? WHITE : INK, 1, Align::Center);
   }
   for (int k = 0; k < 12; k++) {
     const int i = pickPage_ * 12 + k;

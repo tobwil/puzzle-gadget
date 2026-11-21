@@ -2,6 +2,7 @@
 // Mechaniken: ziehen, tippen, halten, Kreis malen, schütteln, klopfen, pusten (Mikrofon), umdrehen (IMU),
 // und Teile der Oberfläche selbst (Aufgabentext, „Deko“) sind Teil des Rätsels.
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 
@@ -558,9 +559,9 @@ class Candles : public Level {
     win.tick(f, h, 0.9f);
     if (win.on()) return;
     auto out = [&](int i) { if (lit[i]) { lit[i] = false; outT[i] = f.t; h.sfx(SFX_WHOOSH); } };
-    if (f.voice > 0.3f) {
+    if (f.voice > 0.35f) {
       blowT += f.dt;
-      if (blowT > 0.3f) { for (int i = 0; i < 3; i++) if (lit[i]) { out(i); break; } blowT = 0; }
+      if (blowT > 0.35f) { for (int i = 0; i < 3; i++) if (lit[i]) { out(i); break; } blowT = 0; }
     }
     if (f.down && std::fabs(f.vx) > 600 && f.y > FY - 40 && f.y < FY + 50)
       for (int i = 0; i < 3; i++) if (std::fabs(f.x - CXS[i]) < 26) out(i);
@@ -938,6 +939,82 @@ void artSeries(Scene& s, float t, float won, int) {
   }
 }
 
+// Zahlenreihen mit Lücke an Stelle 4: {a, b, c, ?, e}, Lösung in [3]
+constexpr int SERIES[5][5] = {{2, 4, 6, 8, 10}, {5, 10, 15, 20, 25}, {1, 3, 5, 7, 9}, {10, 8, 6, 4, 2}, {1, 2, 4, 8, 16}};
+template <int ID>
+void artSeriesN(Scene& s, float t, float won, int) {
+  const float r = 26, g = 8, x0 = CX - (5 * 2 * r + 4 * g) / 2 + r;
+  for (int i = 0; i < 5; i++) {
+    const bool q = i == 3;
+    const float x = x0 + i * (2 * r + g), y = 172 + (q ? 0 : 3 * std::sin(t * 3 + i));
+    s.circle(x, y, r, q ? (won > 0 ? CYAN : YELLOW) : i % 2 ? MINT : PINK);
+    char b[4];
+    std::snprintf(b, sizeof b, "%d", SERIES[ID][i]);
+    s.text(fonts::num, q && won <= 0 ? "?" : b, x, y - 13, INK, 1, Align::Center);
+  }
+}
+
+const QuizSpec K_ROOSTER{
+    {"A rooster lays an egg right on the tip of a roof. Which way does it roll?", "Ein Hahn legt ein Ei genau auf die Spitze vom Dach. Auf welche Seite rollt es?"},
+    {"Who lays eggs – the rooster or the hen?", "Wer legt eigentlich Eier – der Hahn oder die Henne?"},
+    nullptr, 3, 2, {{"LEFT", "LINKS"}, {"RIGHT", "RECHTS"}, {"NEITHER", "GAR NICHT"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_COMB{
+    {"What has teeth but cannot bite?", "Was hat Zähne, kann aber nicht beißen?"},
+    {"You use it on your hair.", "Du brauchst es für deine Haare."},
+    nullptr, 3, 0, {{"COMB", "KAMM"}, {"SHARK", "HAI"}, {"DOG", "HUND"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_SPIDER{
+    {"How many legs does a spider have?", "Wie viele Beine hat eine Spinne?"},
+    {"More than a beetle. Beetles have 6.", "Mehr als ein Käfer. Käfer haben 6."},
+    "8", 0, 0, {}, "6", {"That's a beetle!", "Das ist ein Käfer!"}, nullptr, 0};
+const QuizSpec K_SERIES5{{"Which number is missing?", "Welche Zahl fehlt?"}, {"Count in steps of 5.", "Zähl in Fünferschritten."}, "20", 0, 0, {}, nullptr, {}, artSeriesN<1>, 0};
+const QuizSpec K_APPLES{
+    {"There are 5 apples on the table. You take 3 of them. How many apples do YOU have?", "Auf dem Tisch liegen 5 Äpfel. Du nimmst 3 davon. Wie viele Äpfel hast DU?"},
+    {"Not how many are left – how many are in your hands?", "Nicht wie viele übrig sind – wie viele hast du in der Hand?"},
+    "3", 0, 0, {}, "2", {"You took 3!", "Du hast doch 3 genommen!"}, nullptr, 0};
+const QuizSpec K_COCOA{
+    {"Which hand is best for stirring your hot chocolate?", "Mit welcher Hand rührst du den Kakao am besten um?"},
+    {"With your hand it gets hot and sticky …", "Mit der Hand wird es heiß und klebrig …"},
+    nullptr, 3, 2, {{"LEFT", "LINKS"}, {"RIGHT", "RECHTS"}, {"A SPOON", "LÖFFEL"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_BUS{
+    {"A bus has 4 wheels. How many wheels do 3 buses have?", "Ein Bus hat 4 Räder. Wie viele Räder haben 3 Busse?"},
+    {"4 + 4 + 4", "4 + 4 + 4"},
+    "12", 0, 0, {}, "7", {"Not plus – three times!", "Nicht plus – dreimal!"}, nullptr, 0};
+const QuizSpec K_SHORTEST{
+    {"Lisa is taller than Tom. Tom is taller than Ben. Who is the shortest?", "Lisa ist größer als Tom. Tom ist größer als Ben. Wer ist am kleinsten?"},
+    {"Line them up: Lisa, then Tom, then …", "Stell sie in eine Reihe: Lisa, dann Tom, dann …"},
+    nullptr, 3, 2, {{"LISA", "LISA"}, {"TOM", "TOM"}, {"BEN", "BEN"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_SERIES_ODD{{"Which number is missing?", "Welche Zahl fehlt?"}, {"Always +2.", "Immer +2."}, "7", 0, 0, {}, nullptr, {}, artSeriesN<2>, 0};
+const QuizSpec K_DAYS{
+    {"Today is Monday. What day is the day after tomorrow?", "Heute ist Montag. Welcher Tag ist übermorgen?"},
+    {"Tomorrow is Tuesday. And the day after that?", "Morgen ist Dienstag. Und der Tag danach?"},
+    nullptr, 3, 1, {{"TUESDAY", "DIENSTAG"}, {"WEDNESDAY", "MITTWOCH"}, {"THURSDAY", "DONNERSTAG"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_ODD{
+    {"Which one does not belong?", "Was gehört nicht dazu?"},
+    {"Three of them grow on trees.", "Drei davon wachsen am Baum."},
+    nullptr, 4, 2, {{"APPLE", "APFEL"}, {"PEAR", "BIRNE"}, {"CARROT", "KAROTTE"}, {"BANANA", "BANANE"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_RABBITS{
+    {"6 rabbits are in a meadow. 2 hop away, then 3 more come. How many are there now?", "Auf einer Wiese sind 6 Hasen. 2 hoppeln weg, dann kommen 3 dazu. Wie viele sind es jetzt?"},
+    {"6 – 2, then + 3.", "6 – 2, dann + 3."},
+    "7", 0, 0, {}, nullptr, {}, nullptr, 0};
+const QuizSpec K_CUBE{
+    {"How many corners does a dice have?", "Wie viele Ecken hat ein Würfel?"},
+    {"4 corners on top, and how many at the bottom?", "Oben 4 Ecken, und unten?"},
+    "8", 0, 0, {}, "4", {"Look underneath too!", "Schau auch unten nach!"}, nullptr, 0};
+const QuizSpec K_SERIES_DOWN{{"Which number is missing?", "Welche Zahl fehlt?"}, {"It goes down: always –2.", "Es wird weniger: immer –2."}, "4", 0, 0, {}, nullptr, {}, artSeriesN<3>, 0};
+const QuizSpec K_PENGUIN{
+    {"Which bird cannot fly?", "Welcher Vogel kann nicht fliegen?"},
+    {"It lives where it is very cold and swims instead.", "Er lebt da, wo es sehr kalt ist, und schwimmt lieber."},
+    nullptr, 4, 0, {{"PENGUIN", "PINGUIN"}, {"EAGLE", "ADLER"}, {"SPARROW", "SPATZ"}, {"OWL", "EULE"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_RIDDLE{
+    {"I am thinking of a number. Double it and add 2, and you get 10. What is my number?", "Ich denke mir eine Zahl. Verdoppelt und plus 2 ergibt das 10. Welche Zahl ist es?"},
+    {"Go backwards: 10 – 2, then halve it.", "Rechne rückwärts: 10 – 2, dann die Hälfte."},
+    "4", 0, 0, {}, "8", {"Halve it too!", "Noch halbieren!"}, nullptr, 0};
+const QuizSpec K_MUM{
+    {"Dad is 35 years old. Mum is 3 years younger. How old is Mum?", "Papa ist 35 Jahre alt. Mama ist 3 Jahre jünger. Wie alt ist Mama?"},
+    {"Younger means fewer years.", "Jünger heißt weniger Jahre."},
+    "32", 0, 0, {}, "38", {"Younger means less!", "Jünger heißt weniger!"}, nullptr, 0};
+const QuizSpec K_SERIES_DOUBLE{{"Which number is missing?", "Welche Zahl fehlt?"}, {"Each number is double the one before.", "Jede Zahl ist doppelt so groß wie die davor."}, "8", 0, 0, {}, "10", {"Not +2 – double!", "Nicht +2 – verdoppeln!"}, artSeriesN<4>, 0};
+
 const QuizSpec K_SHEEP{
     {"A farmer has 5 sheep. All but 3 run away. How many sheep are left?", "Ein Bauer hat 5 Schafe. Alle bis auf 3 laufen weg. Wie viele Schafe bleiben übrig?"},
     {"“All but 3” means: 3 stay.", "„Alle bis auf 3“ heißt: 3 bleiben da."},
@@ -1035,8 +1112,9 @@ class StroopSprint : public Level {
   float startT = -1, wrongT = -10, okT = -10;
   uint32_t seed = 0xC0FFEE;
   char ans[2] = {};
-  static constexpr int NEED = 10;
-  static constexpr float LIMIT = 12, GW = 152, GH = 42, GY0 = 252, GY1 = 300;
+  const int NEED;       // Erwachsene 10 in 12 s, Kinder 6 in 15 s
+  const float LIMIT;
+  static constexpr float GW = 152, GH = 42, GY0 = 252, GY1 = 300;
   static const Txt& name(int i) {
     static const Txt N[4] = {{"RED", "ROT"}, {"BLUE", "BLAU"}, {"GREEN", "GRÜN"}, {"YELLOW", "GELB"}};
     return N[i];
@@ -1049,7 +1127,11 @@ class StroopSprint : public Level {
   }
   void box(int i, float& x, float& y) const { x = i % 2 ? CX + 6 : CX - 6 - GW; y = i / 2 ? GY1 : GY0; }
  public:
-  Txt task() const override { return {"Tap the INK COLOR: 10 in a row within 12 seconds!", "Tippe die SCHRIFTFARBE: 10 richtige in Folge in 12 s!"}; }
+  explicit StroopSprint(int need = 10, float limit = 12) : NEED(need), LIMIT(limit) {}
+  Txt task() const override {
+    if (NEED < 10) return {"Tap the INK COLOR: 6 in a row within 15 seconds!", "Tippe die SCHRIFTFARBE: 6 richtige in Folge in 15 s!"};
+    return {"Tap the INK COLOR: 10 in a row within 12 seconds!", "Tippe die SCHRIFTFARBE: 10 richtige in Folge in 12 s!"};
+  }
   Txt hint() const override { return {"Ignore what the word says. Only the color of the letters counts.", "Ignorier, was da steht. Nur die Farbe der Buchstaben zählt."}; }
   int tools() const override { return TOOL_FINGER | TOOL_THINK; }
   const char* answer() const override { return ans; }
@@ -1083,12 +1165,12 @@ class StroopSprint : public Level {
   void draw(Scene& s, const Frame& f, int lang) override {
     const float pop = f.t - okT < 0.15f ? 1.06f : 1;
     if (!win.on()) s.text(fonts::huge, tr(name(word), lang), CX, 140 - (pop - 1) * 40, color(ink), 1, Align::Center);
-    else s.text(fonts::huge, "10/10", CX, 140, INK, 1, Align::Center);
+    else { char b[8]; std::snprintf(b, sizeof b, "%d/%d", NEED, NEED); s.text(fonts::huge, b, CX, 140, INK, 1, Align::Center); }
     if (startT >= 0 && !win.on()) {
       const float u = clampf((f.t - startT) / LIMIT, 0, 1);
       s.capsule(CX - 120, 206, CX + 120 - 240 * u, 206, 4, u > 0.75f ? HOTPINK : CYAN);
     }
-    for (int i = 0; i < NEED; i++) s.circle(CX - 81 + i * 18, 226, 5, i < streak || win.on() ? INK : G2);
+    for (int i = 0; i < NEED; i++) s.circle(CX - (NEED - 1) * 9 + i * 18, 226, 5, i < streak || win.on() ? INK : G2);
     for (int i = 0; i < 4; i++) {
       float x, y;
       box(i, x, y);
@@ -1117,7 +1199,7 @@ class Simon : public Level {
   explicit Simon(int n = 7) : N(n), STEP(n < 7 ? 0.85f : 0.6f), ON(n < 7 ? 0.6f : 0.4f) {}
   Txt task() const override { return {"Watch, then repeat the color sequence", "Schau zu und tippe die Farbfolge nach"}; }
   Txt hint() const override {
-    if (N < 7) return {"4 colors. Say them quietly while watching: “blue, yellow …”.", "4 Farben. Sag sie beim Zuschauen leise mit: „blau, gelb …“."};
+    if (N < 7) return {"Say the colors quietly while watching: “blue, yellow …”.", "Sag die Farben beim Zuschauen leise mit: „blau, gelb …“."};
     return {"7 colors. Name them in your head while watching, e.g. “blue, yellow, pink …”.", "7 Farben. Sprich sie beim Zuschauen im Kopf mit, z. B. „blau, gelb, pink …“."};
   }
   int tools() const override { return TOOL_THINK; }
@@ -1309,7 +1391,8 @@ class CountTap : public Level {
  public:
   CountTap(int count, int what) : n(count), kind(what) {}
   Txt task() const override {
-    static const Txt T[2] = {{"How many candies are there?", "Wie viele Bonbons sind das?"}, {"How many mice are there?", "Wie viele Mäuse sind das?"}};
+    static const Txt T[3] = {{"How many candies are there?", "Wie viele Bonbons sind das?"}, {"How many mice are there?", "Wie viele Mäuse sind das?"},
+                             {"How many stars are there?", "Wie viele Sterne sind das?"}};
     return T[kind];
   }
   Txt hint() const override { return {"Touch each one and count out loud: one, two, three …", "Tipp jedes einzeln an und zähl laut: eins, zwei, drei …"}; }
@@ -1327,11 +1410,12 @@ class CountTap : public Level {
   }
   void draw(Scene& s, const Frame& f, int) override {
     static const Col CC[5] = {PINK, CYAN, YELLOW, PURPLE, MINT};
-    const float gap = n <= 3 ? 104 : 84, x0 = CX - gap * (n - 1) / 2;
+    const float gap = n <= 3 ? 104 : n == 4 ? 84 : 66, x0 = CX - gap * (n - 1) / 2;
     for (int i = 0; i < n; i++) {
       const float x = x0 + i * gap, y = 190 + (i % 2) * 14 + (win.on() ? -std::fabs(std::sin(win.since(f) * 8 + i)) * 10 : 0);
       if (kind == 0) drawCandy(s, x, y, n <= 3 ? 1.5f : 1.2f, CC[i]);
-      else drawMouse(s, x + 10, y + (i % 2 ? -14 : 8), n <= 3 ? 0.75f : 0.5f, i % 2);
+      else if (kind == 1) drawMouse(s, x + 10, y + (i % 2 ? -14 : 8), n <= 3 ? 0.75f : 0.5f, i % 2);
+      else sparkle(s, x, y + (i % 2 ? -10 : 6), n <= 3 ? 30 : 24, AMBER, 1, 0.1f * i);
       if (win.on()) {
         char b[4];
         std::snprintf(b, sizeof b, "%d", i + 1);
@@ -1429,6 +1513,396 @@ class Shapes : public Level {
   }
 };
 
+// Tiere zeichnen (für Suchen und Zuordnen); Mittelpunkt etwa bei (x, y), Breite gut 100 px bei k = 1
+const Txt ANIMAL_IS[7] = {{"That's an owl!", "Das ist eine Eule!"}, {"That's a rabbit!", "Das ist ein Hase!"}, {"That's an elephant!", "Das ist ein Elefant!"},
+                          {"That's a bat!", "Das ist eine Fledermaus!"}, {"That's a dog!", "Das ist ein Hund!"}, {"That's a mouse!", "Das ist eine Maus!"},
+                          {"That's a dinosaur!", "Das ist ein Dino!"}};
+void drawAnimal(Scene& s, int a, float x, float y, float k, float t) {
+  switch (a) {
+    case 0: drawOwl(s, x, y - 4, 0.52f * k, 1, t); break;
+    case 1: drawRabbit(s, x, y + 34 * k, 0.85f * k); break;
+    case 2: drawElephant(s, x - 8 * k, y - 4, 0.62f * k); break;
+    case 3: drawBat(s, x, y, 0.7f * k, 0, false); break;
+    case 4: drawDog(s, x, y + 30 * k, 0.6f * k, 0, t, false); break;
+    case 5: drawMouse(s, x + 12 * k, y + 6, 0.9f * k); break;
+    default: drawDino(s, x + 4 * k, y + 6, 0.5f * k, 1); break;
+  }
+}
+
+// Wo ist das Tier? Drei Tiere, eins antippen
+class FindAnimal : public Level {
+  Win win;
+  int want, hit = -1, wrongI = -1;
+  float wrongT = -10;
+  static constexpr float XS[3] = {72, 184, 296}, Y = 226;
+  int at(int slot) const { const int t = want % 3; return slot == t ? want : (want + (slot < t ? slot : slot - 1) * 2 + 1) % 7; }
+  char ans[2] = {};
+ public:
+  explicit FindAnimal(int a) : want(a) { ans[0] = char('0' + want % 3); }
+  Txt task() const override {
+    static const Txt T[7] = {{"Where is the owl?", "Wo ist die Eule?"}, {"Where is the rabbit?", "Wo ist der Hase?"}, {"Where is the elephant?", "Wo ist der Elefant?"},
+                             {"Where is the bat?", "Wo ist die Fledermaus?"}, {"Where is the dog?", "Wo ist der Hund?"}, {"Where is the mouse?", "Wo ist die Maus?"},
+                             {"Where is the dinosaur?", "Wo ist der Dino?"}};
+    return T[want];
+  }
+  Txt hint() const override {
+    static const Txt T[7] = {{"The owl has big round eyes.", "Die Eule hat große runde Augen."}, {"The rabbit has long ears.", "Der Hase hat lange Ohren."},
+                             {"The elephant has a long trunk.", "Der Elefant hat einen langen Rüssel."}, {"The bat has wings.", "Die Fledermaus hat Flügel."},
+                             {"The dog wags its tail.", "Der Hund wedelt mit dem Schwanz."}, {"The mouse is small with a thin tail.", "Die Maus ist klein und hat einen dünnen Schwanz."},
+                             {"The dinosaur has spikes on its back.", "Der Dino hat Zacken auf dem Rücken."}};
+    return T[want];
+  }
+  const char* answer() const override { return ans; }
+  void reset() override { win.reset(); hit = wrongI = -1; wrongT = -10; }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 1.0f);
+    if (win.on() || !f.tap) return;
+    for (int i = 0; i < 3; i++) {
+      if (std::fabs(f.x - XS[i]) > 56 || std::fabs(f.y - Y) > 80) continue;
+      if (at(i) == want) { hit = i; win.start(f); h.sfx(SFX_MAGIC); h.say(XS[i], Y - 90, {"Yes!", "Ja!"}, HOTPINK); }
+      else { wrongI = i; wrongT = f.t; h.sfx(SFX_NOPE); h.say(XS[i], Y - 90, ANIMAL_IS[at(i)]); }
+    }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    s.ellipse(CX, Y + 62, 170, 12, G1, G2);
+    for (int i = 0; i < 3; i++) {
+      const float sh = i == wrongI && f.t - wrongT < 0.4f ? std::sin((f.t - wrongT) * 50) * 5 : 0;
+      const float jump = i == hit ? std::fabs(std::sin(win.since(f) * 9)) * 14 : 0;
+      drawAnimal(s, at(i), XS[i] + sh, Y - jump, 1, f.t);
+    }
+    if (win.on()) rays(s, XS[hit], Y, 66, 78, 10, 2.5f, YELLOW, 1, f.t);
+  }
+};
+
+// Ballons platzen lassen: alle, nur die roten, oder der Reihe nach 1–6
+class Balloons : public Level {
+  Win win;
+  int n, mode;   // mode 0 alle, 1 nur rote, 2 der Reihe nach (Zahlen)
+  bool popped[6] = {};
+  float popT[6] = {}, wrongT = -10;
+  int next = 0;
+  char ans[8] = {};
+  static constexpr float P[6][2] = {{72, 176}, {154, 146}, {234, 180}, {306, 150}, {114, 270}, {262, 272}};
+  static constexpr int ORDER[6] = {3, 0, 5, 1, 4, 2};   // Zahl k+1 steht auf Ballon ORDER[k]
+  bool red(int i) const { return i == 0 || i == 2 || i == 5; }
+  Col color(int i) const {
+    static const Col C[6] = {RED, CYAN, RED, YELLOW, MINT, RED};
+    static const Col C2[6] = {PINK, CYAN, YELLOW, PURPLE, MINT, ORANGE};
+    return mode == 1 ? C[i] : C2[i];
+  }
+  int numberOf(int i) const { for (int k = 0; k < 6; k++) if (ORDER[k] == i) return k + 1; return 0; }
+  bool target(int i) const { return mode != 1 || red(i); }
+  bool done() const { for (int i = 0; i < n; i++) if (target(i) && !popped[i]) return false; return true; }
+ public:
+  Balloons(int count, int m) : n(count), mode(m) {
+    int k = 0;
+    if (mode == 2) for (int j = 0; j < n; j++) ans[k++] = char('0' + ORDER[j]);
+    else for (int i = 0; i < n; i++) if (target(i)) ans[k++] = char('0' + i);
+    ans[k] = 0;
+  }
+  Txt task() const override {
+    if (mode == 1) return {"Pop only the red balloons!", "Lass nur die roten Ballons platzen!"};
+    if (mode == 2) return {"Pop the balloons in order: 1, 2, 3 …", "Lass die Ballons der Reihe nach platzen: 1, 2, 3 …"};
+    return {"Pop all the balloons!", "Lass alle Ballons platzen!"};
+  }
+  Txt hint() const override {
+    if (mode == 1) return {"Leave the other colors alone.", "Die anderen Farben lässt du in Ruhe."};
+    if (mode == 2) return {"Start with 1. A mistake brings all balloons back.", "Fang bei 1 an. Bei einem Fehler kommen alle Ballons zurück."};
+    return {"Tap each balloon once.", "Tipp jeden Ballon einmal an."};
+  }
+  const char* answer() const override { return ans; }
+  void reset() override { win.reset(); for (bool& p : popped) p = false; next = 0; wrongT = -10; }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 0.8f);
+    if (win.on() || !f.pressed) return;
+    for (int i = 0; i < n; i++) {
+      if (popped[i] || dist(f.x, f.y, P[i][0], P[i][1] + std::sin(f.t * 2 + i) * 5) > 40) continue;
+      if (mode == 1 && !red(i)) { h.nope(P[i][0], P[i][1] - 50); return; }
+      if (mode == 2 && numberOf(i) != next + 1) {
+        h.nope(P[i][0], P[i][1] - 50);
+        for (bool& p : popped) p = false;
+        next = 0;
+        wrongT = f.t;
+        return;
+      }
+      popped[i] = true; popT[i] = f.t; next++;
+      h.sfx(SFX_POP);
+      if (done()) { win.start(f); h.sfx(SFX_WIN); }
+      return;
+    }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    for (int i = 0; i < n; i++) {
+      const float x = P[i][0], y = P[i][1] + std::sin(f.t * 2 + i) * 5;
+      if (popped[i]) {
+        const float u = (f.t - popT[i]) / 0.35f;
+        if (u < 1) for (int k = 0; k < 8; k++) {
+          const float a = k * TAU / 8;
+          s.capsule(x + std::sin(a) * (20 + u * 20), y + std::cos(a) * (20 + u * 20), x + std::sin(a) * (28 + u * 26), y + std::cos(a) * (28 + u * 26), 2, color(i), 1 - u);
+        }
+        continue;
+      }
+      const float px[] = {x, y + 38, x + 6, y + 58, x - 4, y + 78, x + 2, y + 96};
+      for (int k = 0; k < 3; k++) s.capsule(px[2 * k], px[2 * k + 1], px[2 * k + 2], px[2 * k + 3], 1, G4);
+      tri(s, x - 6, y + 40, x + 6, y + 40, x, y + 32, dk::scale(color(i), 0.8f));
+      s.ellipse(x, y, 28, 34, color(i), dk::scale(color(i), 0.8f));
+      s.ellipse(x - 9, y - 12, 6, 10, WHITE, 0.45f);
+      if (mode == 2) {
+        char b[4];
+        std::snprintf(b, sizeof b, "%d", numberOf(i));
+        s.text(fonts::heavy, b, x, y - 17, INK, 1, Align::Center);
+      }
+    }
+    if (f.t - wrongT < 0.5f) s.text(fonts::hand, "1, 2, 3 …", CX, 330, HOTPINK, 1 - (f.t - wrongT) / 0.5f, Align::Center);
+  }
+};
+
+// Bring es nach Hause (ziehen): Maus zum Käse, Hund in die Hütte
+class DragHome : public Level {
+  Drag thing;
+  Win win;
+  int v;
+  static constexpr float HX = 270, HY = 250;
+ public:
+  explicit DragHome(int variant) : v(variant) {}
+  Txt task() const override { return v == 0 ? Txt{"Bring the mouse to the cheese", "Bring die Maus zum Käse"} : Txt{"Bring the dog into its kennel", "Bring den Hund in seine Hütte"}; }
+  Txt hint() const override { return {"Put your finger on it and pull.", "Leg den Finger drauf und zieh."}; }
+  void reset() override { thing.set(84, 300); win.reset(); }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 1.0f);
+    if (win.on()) return;
+    if (thing.grab(f, 60)) {
+      if (f.pressed) h.sfx(SFX_POP);
+      thing.move(f);
+      if (thing.drop(f) && dist(thing.x, thing.y, HX, HY + 30) < 80) {
+        thing.set(HX, HY + 30);
+        win.start(f);
+        h.sfx(v == 0 ? SFX_CHOMP : SFX_WOOF);
+      }
+    }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    s.ellipse(CX, 336, 170, 12, G1, G2);
+    if (v == 0) {   // Käse
+      tri(s, HX - 60, HY + 30, HX + 50, HY + 30, HX + 50, HY - 20, YELLOW);
+      s.rrect(HX - 60, HY + 30, 110, 22, 4, hex(0xF5D800));
+      for (auto& c : {std::array<float, 3>{HX - 10, HY + 22, 6}, {HX + 26, HY + 10, 7}, {HX + 10, HY + 40, 5}}) s.circle(c[0], c[1], c[2], hex(0xE0BC00));
+      if (win.on()) { const float u = win.since(f); for (int i = 0; i < 2; i++) { const float hy = HY - 40 - u * 40 - i * 20; s.circle(HX - 25 + i * 30 - 5, hy, 6, HOTPINK, 1 - u); s.circle(HX - 25 + i * 30 + 5, hy, 6, HOTPINK, 1 - u); tri(s, HX - 25 + i * 30 - 11, hy + 2, HX - 25 + i * 30 + 11, hy + 2, HX - 25 + i * 30, hy + 14, HOTPINK, 1 - u); } }
+      drawMouse(s, thing.x + 10, thing.y, thing.on ? 0.95f : 0.85f, win.on());
+    } else {   // Hütte
+      s.rrect(HX - 56, HY - 30, 112, 100, 6, G2);
+      for (int i = 0; i < 5; i++) s.capsule(HX - 54, HY - 14 + i * 18, HX + 54, HY - 14 + i * 18, 1.2f, G3);
+      tri(s, HX - 70, HY - 26, HX + 70, HY - 26, HX, HY - 88, G5);
+      s.rrect(HX - 26, HY + 12, 52, 58, 22, G6);
+      s.rrect(HX - 26, HY + 42, 52, 28, 0, G6);
+      if (win.on()) { drawDog(s, HX + 4, HY + 70, 0.5f, 0, f.t, true); zzz(s, HX + 30, HY + 10, f.t, CYAN); }
+      else drawDog(s, thing.x, thing.y + 30, thing.on ? 0.62f : 0.58f, 0, f.t, false);
+    }
+  }
+};
+
+// Kitzeln / streicheln: Finger auf dem Tier hin und her bewegen
+class Tickle : public Level {
+  Win win;
+  int v;
+  float rubbed = 0, lastSay = 0, wig = 0;
+  static constexpr float TX = CX, TY = 240;
+ public:
+  explicit Tickle(int variant) : v(variant) {}
+  Txt task() const override { return v == 0 ? Txt{"Tickle the dinosaur!", "Kitzel den Dino!"} : Txt{"Pet the dog!", "Streichel den Hund!"}; }
+  Txt hint() const override { return {"Rub your finger back and forth on it.", "Fahr mit dem Finger hin und her über das Tier."}; }
+  void reset() override { win.reset(); rubbed = lastSay = wig = 0; }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 1.2f);
+    wig = std::fmax(0.f, wig - f.dt * 2);
+    if (win.on() || !f.down || dist(f.x, f.y, TX, TY) > 120) return;
+    const float d = (std::fabs(f.vx) + std::fabs(f.vy)) * f.dt;
+    if (d < 1) return;
+    rubbed += d;
+    wig = 1;
+    if (rubbed - lastSay > 180) {
+      lastSay = rubbed;
+      if (v == 0) { h.say(TX + (int(rubbed) % 2 ? 70 : -70), TY - 110, {"Hihi!", "Hihi!"}, HOTPINK); h.sfx(SFX_SQUEAK); }
+      else h.say(TX + 60, TY - 90, {"Mmmh!", "Mmmh!"}, HOTPINK);
+    }
+    if (rubbed > 900) { win.start(f); h.sfx(v == 0 ? SFX_WIN : SFX_WOOF); }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    s.ellipse(CX, 330, 160, 12, G1, G2);
+    const float w = std::sin(f.t * 30) * 4 * wig;
+    if (v == 0) drawDino(s, TX + w, TY + 10, 1.0f, rubbed > 300 || win.on() ? 1 : 0);
+    else drawDog(s, TX + w, TY + 70, 1.0f, 0, f.t * (1 + 3 * wig), false);
+    const float u = clampf(rubbed / 900, 0, 1);   // Herzen zeigen den Fortschritt
+    for (int i = 0; i < 5; i++) {
+      const bool on = u * 5 > i + 0.5f || win.on();
+      const float hx = CX - 72 + i * 36, hy = 128;
+      s.circle(hx - 5, hy, 6, on ? HOTPINK : G2);
+      s.circle(hx + 5, hy, 6, on ? HOTPINK : G2);
+      tri(s, hx - 11, hy + 2, hx + 11, hy + 2, hx, hy + 14, on ? HOTPINK : G2);
+    }
+  }
+};
+
+// Wo sind mehr / weniger? Zwei Gruppen, eine antippen
+class MoreLess : public Level {
+  Win win;
+  int a, b, kind, wrongI = -1;
+  bool more;
+  float wrongT = -10;
+  char ans[2] = {};
+  static constexpr float BY = 118, BH = 190;
+  int right() const { return (more ? a > b : a < b) ? 0 : 1; }
+ public:
+  MoreLess(int left, int rgt, bool m, int k) : a(left), b(rgt), kind(k), more(m) { ans[0] = char('0' + right()); }
+  Txt task() const override {
+    if (kind == 0) return more ? Txt{"Where are there more candies?", "Wo sind mehr Bonbons?"} : Txt{"Where are there fewer candies?", "Wo sind weniger Bonbons?"};
+    return more ? Txt{"Where are there more mice?", "Wo sind mehr Mäuse?"} : Txt{"Where are there fewer mice?", "Wo sind weniger Mäuse?"};
+  }
+  Txt hint() const override { return more ? Txt{"Count both sides. More is the bigger number.", "Zähl beide Seiten. Mehr ist die größere Zahl."} : Txt{"Count both sides. Fewer is the smaller number.", "Zähl beide Seiten. Weniger ist die kleinere Zahl."}; }
+  const char* answer() const override { return ans; }
+  void reset() override { win.reset(); wrongI = -1; wrongT = -10; }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 1.0f);
+    if (win.on() || !f.tap || f.y < BY || f.y > BY + BH) return;
+    const int side = f.x < CX ? 0 : 1;
+    if (side == right()) { win.start(f); h.sfx(SFX_WIN); }
+    else { wrongI = side; wrongT = f.t; h.say(side ? 268 : 100, BY - 10, {"Count again!", "Zähl nochmal!"}); h.sfx(SFX_NOPE); }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    static const Col CC[6] = {PINK, CYAN, YELLOW, PURPLE, MINT, ORANGE};
+    for (int side = 0; side < 2; side++) {
+      const int n = side ? b : a;
+      const float x0 = side ? 192 : 24;
+      const float sh = side == wrongI && f.t - wrongT < 0.4f ? std::sin((f.t - wrongT) * 50) * 5 : 0;
+      const bool ok = win.on() && side == right();
+      s.rrect(x0 + sh, BY, 152, BH, 20, ok ? hex(0xE9FDFE) : G1);
+      if (ok) s.rrect(x0 + sh, BY, 152, 6, 3, CYAN);
+      for (int i = 0; i < n; i++) {
+        const float x = x0 + 40 + (i % 2) * 72 + sh, y = BY + 34 + (i / 2) * 58 + (i % 2) * 8;
+        if (kind == 0) drawCandy(s, x, y, 0.95f, CC[i % 6]);
+        else drawMouse(s, x + 8, y + 6, 0.42f, i % 2);
+      }
+    }
+  }
+};
+
+// Hütchenspiel: Unter welchem Becher ist das Bonbon? (Kleine: Becher bleiben stehen; Kinder: werden vertauscht)
+class Cups : public Level {
+  Win win;
+  int swaps, pos[3] = {0, 1, 2}, sw[8][2] = {};   // pos[Becher] = Platz; Becher 0 hat das Bonbon
+  int lifted = -1;
+  float t0 = 0, liftT = -10;
+  bool wrong = false;
+  uint32_t seed = 0xC0B5;
+  char ans[2] = {};
+  static constexpr float CY = 256, SHOW = 1.6f, D = 0.7f;
+  static float slotX(int p) { return 84 + p * 100; }
+  float playEnd() const { return t0 + SHOW + swaps * D; }
+  void round(float start) {
+    t0 = start;
+    pos[0] = lcg(seed) % 3; pos[1] = (pos[0] + 1) % 3; pos[2] = (pos[0] + 2) % 3;
+    int p[3] = {pos[0], pos[1], pos[2]};
+    for (int k = 0; k < swaps; k++) {
+      const int a = lcg(seed) % 3, b = (a + 1 + lcg(seed) % 2) % 3;
+      sw[k][0] = a; sw[k][1] = b;
+      for (int& q : p) q = q == a ? b : q == b ? a : q;
+    }
+    ans[0] = char('0' + p[0]);
+    lifted = -1; wrong = false;
+  }
+  // Lage von Becher c zur Zeit t (x, y); während eines Tauschs auf einem Bogen
+  void cupAt(int c, float t, float& x, float& y) const {
+    int p = pos[c];
+    const float u = (t - t0 - SHOW) / D;
+    y = CY;
+    for (int k = 0; k < swaps; k++) {
+      const int a = sw[k][0], b = sw[k][1];
+      if (u < k) break;
+      const int q = p == a ? b : p == b ? a : p;
+      if (u < k + 1 && q != p) {
+        const float v = ease(u - k);
+        x = lerpf(slotX(p), slotX(q), v);
+        y = CY + (p < q ? -1 : 1) * std::sin(v * PIF) * 34;
+        return;
+      }
+      p = q;
+    }
+    x = slotX(p);
+  }
+ public:
+  explicit Cups(int n) : swaps(n) {}
+  Txt task() const override { return swaps ? Txt{"Watch closely: where is the candy?", "Pass gut auf: Wo ist das Bonbon?"} : Txt{"Remember where the candy is!", "Merk dir, wo das Bonbon ist!"}; }
+  Txt hint() const override { return swaps ? Txt{"Follow just one cup with your eyes.", "Folge nur einem Becher mit den Augen."} : Txt{"Look where the candy goes before the cups come down.", "Schau, wo das Bonbon liegt, bevor die Becher runterkommen."}; }
+  const char* answer() const override { return ans; }
+  void reset() override { win.reset(); seed = 0xC0B5 + swaps; round(0.4f); }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 1.0f);
+    if (win.on()) return;
+    if (wrong && f.t - liftT > 1.2f) round(f.t + 0.3f);
+    if (wrong || f.t < playEnd() || !f.tap) return;
+    for (int c = 0; c < 3; c++) {
+      float x, y;
+      cupAt(c, f.t, x, y);
+      if (std::fabs(f.x - x) > 46 || f.y < CY - 80 || f.y > CY + 60) continue;
+      lifted = c; liftT = f.t;
+      if (c == 0) { win.start(f); h.sfx(SFX_WIN); h.say(x, CY - 110, {"Found it!", "Gefunden!"}, HOTPINK); }
+      else { wrong = true; h.nope(x, CY - 110); }
+    }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    s.ellipse(CX, CY + 44, 170, 14, G1, G2);
+    const float show = f.t - t0;
+    for (int c = 0; c < 3; c++) {
+      float x, y;
+      cupAt(c, f.t, x, y);
+      float up = 0;
+      if (show < SHOW) up = show < SHOW - 0.5f ? 70 : 70 * (1 - ease((show - (SHOW - 0.5f)) / 0.5f));   // am Anfang angehoben
+      if (c == lifted) up = 70 * ease((f.t - liftT) / 0.25f);
+      if (c == 0 && up > 5) drawCandy(s, x, CY + 26, 0.9f, PINK);
+      const float yy = y - up;
+      s.rrect(x - 34, yy - 30, 68, 68, 12, G3);
+      s.ellipse(x, yy + 36, 40, 9, G2, G4);
+      s.ellipse(x, yy - 30, 30, 6, G4, G3);
+      s.ellipse(x - 16, yy, 5, 20, WHITE, 0.5f);
+    }
+  }
+};
+
+// Was passt nicht dazu? Drei gleiche und ein anderes
+class OddOne : public Level {
+  Win win;
+  int v, hit = -1, wrongI = -1;
+  float wrongT = -10;
+  char ans[2] = {};
+  static constexpr float P[4][2] = {{110, 170}, {258, 170}, {110, 282}, {258, 282}};
+  int odd() const { return v == 0 ? 2 : 1; }
+ public:
+  explicit OddOne(int variant) : v(variant) { ans[0] = char('0' + odd()); }
+  Txt task() const override { return {"Which one does not belong?", "Was passt nicht dazu?"}; }
+  Txt hint() const override { return {"Three are the same kind, one is different.", "Drei sind gleich, eins ist anders."}; }
+  const char* answer() const override { return ans; }
+  void reset() override { win.reset(); hit = wrongI = -1; wrongT = -10; }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 1.0f);
+    if (win.on() || !f.tap) return;
+    for (int i = 0; i < 4; i++) {
+      if (dist(f.x, f.y, P[i][0], P[i][1]) > 58) continue;
+      if (i == odd()) { hit = i; win.start(f); h.sfx(SFX_MAGIC); h.say(P[i][0], P[i][1] - 60, {"Yes!", "Ja!"}, HOTPINK); }
+      else { wrongI = i; wrongT = f.t; h.nope(P[i][0], P[i][1] - 60); }
+    }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    static const Col CC[4] = {PINK, CYAN, YELLOW, MINT};
+    for (int i = 0; i < 4; i++) {
+      const float sh = i == wrongI && f.t - wrongT < 0.4f ? std::sin((f.t - wrongT) * 50) * 5 : 0;
+      const float x = P[i][0] + sh, y = P[i][1] - (i == hit ? std::fabs(std::sin(win.since(f) * 9)) * 12 : 0);
+      if (v == 0) { if (i == odd()) drawMouse(s, x + 10, y + 8, 0.75f); else drawCandy(s, x, y, 1.5f, CC[i]); }
+      else { if (i == odd()) drawCandy(s, x, y, 1.5f, CC[i]); else drawAnimal(s, i == 0 ? 0 : i == 2 ? 1 : 4, x, y, 0.85f, f.t); }
+    }
+    if (win.on()) rays(s, P[hit][0], P[hit][1], 58, 70, 10, 2.5f, YELLOW, 1, f.t);
+  }
+};
+
 }  // namespace
 
 // Kleine (unter 5 Jahre): alles wird vorgelesen, keine Zahlentastatur, keine Sperren
@@ -1450,7 +1924,27 @@ Level* makeSmallLevel(int i) {
     case 12: l = new Retext(new Portal, {"Draw a circle around the ring", "Fahr mit dem Finger rund um den Ring"}, {"Go all the way around without lifting your finger.", "Einmal ganz herum, ohne den Finger hochzuheben."}); break;
     case 13: l = new BigSmall(false, 1); break;
     case 14: l = new Shapes(1); break;
-    default: l = new Retext(new Bat, {"Hang the bat under the branch", "Häng die Fledermaus unten an den Ast"}, {"Pull the bat below the branch.", "Zieh die Fledermaus unter den Ast."}); break;
+    case 15: l = new Retext(new Bat, {"Hang the bat under the branch", "Häng die Fledermaus unten an den Ast"}, {"Pull the bat below the branch.", "Zieh die Fledermaus unter den Ast."}); break;
+    case 16: l = new FindAnimal(0); break;
+    case 17: l = new TapColor(1); break;
+    case 18: l = new Balloons(5, 0); break;
+    case 19: l = new CountTap(2, 0); break;
+    case 20: l = new BigSmall(false, 0); break;
+    case 21: l = new DragHome(0); break;
+    case 22: l = new Shapes(2); break;
+    case 23: l = new Tickle(0); break;
+    case 24: l = new MoreLess(2, 4, true, 0); break;
+    case 25: l = new FindAnimal(1); break;
+    case 26: l = new Cups(0); break;
+    case 27: l = new TapColor(3); break;
+    case 28: l = new CountTap(5, 2); break;
+    case 29: l = new DragHome(1); break;
+    case 30: l = new BigSmall(true, 1); break;
+    case 31: l = new Balloons(6, 1); break;
+    case 32: l = new Tickle(1); break;
+    case 33: l = new MoreLess(5, 3, false, 1); break;
+    case 34: l = new FindAnimal(3); break;
+    default: l = new OddOne(0); break;
   }
   l->kids = true;
   return l;
@@ -1513,6 +2007,30 @@ Level* makeKidLevel(int i) {
     case 21: l = new Maze(2); break;
     case 22: l = new Quiz(K_MONTHS); break;
     case 23: l = new Quiz(K_TOM); break;
+    case 24: l = new Quiz(K_ROOSTER); break;
+    case 25: l = new Cups(4); break;
+    case 26: l = new Quiz(K_COMB); break;
+    case 27: l = new Quiz(K_SPIDER); break;
+    case 28: l = new Quiz(K_SERIES5); break;
+    case 29: l = new Quiz(K_APPLES); break;
+    case 30: l = new Memory7(5, 3.0f); break;
+    case 31: l = new Quiz(K_COCOA); break;
+    case 32: l = new Quiz(K_BUS); break;
+    case 33: l = new Quiz(K_SHORTEST); break;
+    case 34: l = new Balloons(6, 2); break;
+    case 35: l = new Quiz(K_SERIES_ODD); break;
+    case 36: l = new Quiz(K_DAYS); break;
+    case 37: l = new Simon(5); break;
+    case 38: l = new Quiz(K_ODD); break;
+    case 39: l = new Quiz(K_RABBITS); break;
+    case 40: l = new StroopSprint(6, 15); break;
+    case 41: l = new Quiz(K_CUBE); break;
+    case 42: l = new Quiz(K_SERIES_DOWN); break;
+    case 43: l = new Quiz(K_PENGUIN); break;
+    case 44: l = new Maze(3); break;
+    case 45: l = new Quiz(K_RIDDLE); break;
+    case 46: l = new Quiz(K_MUM); break;
+    case 47: l = new Quiz(K_SERIES_DOUBLE); break;
     default: l = makeLevel(i); break;
   }
   l->kids = true;

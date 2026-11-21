@@ -1,8 +1,8 @@
-# Wie default_16MB.csv, aber eine große App statt zwei OTA-Hälften (Sprach-Clips sind eingebettet).
+# Wie default_16MB.csv, aber eine große App (15,9 MB) statt zwei OTA-Hälften und ohne SPIFFS:
+# die Sprach-Clips sind in die Firmware eingebettet.
 # NVS bleibt an derselben Stelle, damit Spielstände ein Update überleben.
 # Name,   Type, SubType, Offset,  Size, Flags
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
-app0,     app,  ota_0,   0x10000, 0xC80000,
-spiffs,   data, spiffs,  0xc90000,0x360000,
+app0,     app,  ota_0,   0x10000, 0xFE0000,
 coredump, data, coredump,0xFF0000,0x10000,

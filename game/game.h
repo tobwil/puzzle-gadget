@@ -71,6 +71,7 @@ class Game : Host {
   void loadProgress();
   const char* key(const char* name) const;   // Speicherschlüssel des aktuellen Modus („bc_…“ bzw. „bk_…“)
   int pages() const { return (levelCount() + 11) / 12; }
+  float pageW() const { return pages() > 3 ? 72 : 96; }   // Breite der Seitenknöpfe
   void drawTaskCard(Scene& s, float a);
   void speak(const char* what);
   void showHint();   // Tipp-Fenster (bei den Kleinen wird der Tipp vorgelesen)
@@ -85,7 +86,7 @@ class Game : Host {
 
   dk::Synth& synth_;
   dk::Store& store_;
-  Level* levels_[LEVELS] = {};
+  Level* levels_[MAX_LEVELS] = {};
   int mode_ = ADULT;
   bool whoSpoken_ = false;
   // Einstellungen

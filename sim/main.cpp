@@ -117,6 +117,15 @@ struct Sim {
     tap(bc::npKeyX(11), bc::npKeyY(11));
   }
   void typeAnswer() { type(game.levelAnswer()); }
+  int ans0() { return game.levelAnswer()[0] - '0'; }
+  void slot3() { tap(72 + 112 * ans0(), 226); }                     // FindAnimal: Platz 0–2
+  void cupTap() { tap(84 + 100 * ans0(), 250); }                    // Hütchenspiel
+  void side() { tap(ans0() ? 268 : 100, 210); }                     // MoreLess: linke oder rechte Gruppe
+  void popBalloons() {                                              // Balloons: Plätze laut Lösung antippen
+    static const float P[6][2] = {{72, 176}, {154, 146}, {234, 180}, {306, 150}, {114, 270}, {262, 272}};
+    for (const char* c = game.levelAnswer(); *c; c++) tap(P[*c - '0'][0], P[*c - '0'][1]);
+  }
+  void rub() { for (int i = 0; i < 4; i++) { drag(90, 240, 280, 240, 0.25f); drag(280, 250, 90, 250, 0.25f); } }
   void shot(const char* name) {
     renderAll();
     char p[256];
@@ -304,6 +313,40 @@ static int tour(const char* dir) {
         },
         [](Sim& s) { s.typeAnswer(); },                                                   // Monate
         [](Sim& s) { s.tap(266, 261); },                                                  // Tom
+        [](Sim& s) { s.tap(184, 311); },                                                  // Hahn: gar nicht
+        [](Sim& s) { s.wait(4.4f); s.cupTap(); },                                         // Hütchenspiel mit Tauschen
+        [](Sim& s) { s.tap(102, 261); },                                                  // Kamm
+        [](Sim& s) { s.type("6"); s.wait(2.3f); s.typeAnswer(); },                        // Spinne: 6 (Falle), 8
+        [](Sim& s) { s.typeAnswer(); },                                                   // 5er-Reihe
+        [](Sim& s) { s.type("2"); s.wait(2.3f); s.typeAnswer(); },                        // Äpfel: 2 (Falle), 3
+        [](Sim& s) { s.wait(3.0f); s.typeAnswer(); },                                     // 5 Ziffern merken
+        [](Sim& s) { s.tap(184, 311); },                                                  // Löffel
+        [](Sim& s) { s.typeAnswer(); },                                                   // Busse
+        [](Sim& s) { s.tap(184, 311); },                                                  // Ben
+        [](Sim& s) { s.tap(118, 192); s.wait(0.3f); s.popBalloons(); },                   // 1–6: erst falsch (2), dann der Reihe nach
+        [](Sim& s) { s.typeAnswer(); },                                                   // ungerade Reihe
+        [](Sim& s) { s.tap(266, 261); },                                                  // Mittwoch
+        [](Sim& s) {                                                                      // Farbfolge (5)
+          s.wait(4.8f);
+          for (const char* c = s.game.levelAnswer(); *c; c++) { const int k = *c - '0'; s.tap(k % 2 ? 238 : 134, k / 2 ? 256 : 170); }
+        },
+        [](Sim& s) { s.tap(102, 311); },                                                  // Karotte
+        [](Sim& s) { s.typeAnswer(); },                                                   // Hasen
+        [](Sim& s) {                                                                      // Stroop: 6 richtige
+          for (int i = 0; i < 6; i++) { const int k = s.game.levelAnswer()[0] - '0'; s.tap(k % 2 ? 266 : 102, k / 2 ? 321 : 273); }
+        },
+        [](Sim& s) { s.typeAnswer(); },                                                   // Würfel
+        [](Sim& s) { s.typeAnswer(); },                                                   // fallende Reihe
+        [](Sim& s) { s.tap(102, 261); },                                                  // Pinguin
+        [](Sim& s) {                                                                      // Labyrinth mit drei Löchern
+          s.imu.tiltX = -0.5f; s.wait(2.0f);
+          s.imu.tiltX = 0; s.imu.tiltY = 0.5f; s.wait(1.6f);
+          s.imu.tiltX = 0.5f; s.imu.tiltY = -0.25f; s.wait(2.6f);
+          s.imu.tiltX = s.imu.tiltY = 0;
+        },
+        [](Sim& s) { s.typeAnswer(); },                                                   // Zahlenrätsel
+        [](Sim& s) { s.typeAnswer(); },                                                   // Mama
+        [](Sim& s) { s.type("10"); s.wait(2.3f); s.typeAnswer(); },                       // Verdoppeln: 10 (Falle), 8
     };
     for (int i = 0; i < bc::KID_LEVELS; i++) {
       sim.game.startLevel(i);
@@ -348,7 +391,7 @@ static int tour(const char* dir) {
         [](Sim& s) { s.tap(184 - 64 * 2 + 29 + 64, 297); s.wait(0.4f); s.tap(184 - 64 * 2 + 29 + 128, 297); },   // 2 (falsch), 3
         [](Sim& s) { s.tap(262, 290); s.wait(0.4f); s.tap(110, 270); },                    // klein (falsch), groß
         [](Sim& s) { s.drag(62, 146, 236, 200, 0.8f); s.wait(1.5f); },                      // Sonne
-        [](Sim& s) { s.voice = 0.8f; s.wait(1.4f); s.voice = 0; },                          // pusten
+        [](Sim& s) { s.voice = 0.8f; s.wait(2.0f); s.voice = 0; },                          // pusten (das Level hört erst nach 1 s hin)
         [](Sim& s) { s.tap(72, 220); s.wait(0.4f); s.tap(296, 220); },                      // Kreis: Platz 2 bei want 0
         [](Sim& s) { s.hold(184, 236, 4.4f); },                                             // Finger aufs Ei
         [](Sim& s) { s.tap(184 + 64, 297); },                                               // 4 Mäuse
@@ -358,6 +401,26 @@ static int tour(const char* dir) {
         [](Sim& s) { s.tap(110, 270); s.wait(0.4f); s.tap(262, 290); },                     // große Maus (falsch), kleine
         [](Sim& s) { s.tap(184, 220); },                                                    // Dreieck in der Mitte
         [](Sim& s) { s.drag(184, 180, 184, 290, 0.6f); },                                   // Fledermaus unter den Ast
+        [](Sim& s) { s.slot3(); },                                                          // Eule
+        [](Sim& s) { s.tap(110, 160); },                                                    // blau
+        [](Sim& s) { s.popBalloons(); },                                                    // alle Ballons
+        [](Sim& s) { s.tap(56 + 64, 297); },                                                // 2 Bonbons
+        [](Sim& s) { s.tap(110, 270); s.wait(0.4f); s.tap(262, 290); },                     // großer (falsch), kleiner Elefant
+        [](Sim& s) { s.drag(84, 300, 270, 280, 0.8f); },                                    // Maus zum Käse
+        [](Sim& s) { s.tap(72, 220); },                                                     // Quadrat
+        [](Sim& s) { s.rub(); },                                                            // Dino kitzeln
+        [](Sim& s) { s.side(); },                                                           // mehr Bonbons
+        [](Sim& s) { s.slot3(); },                                                          // Hase
+        [](Sim& s) { s.wait(1.6f); s.cupTap(); },                                           // Becher merken
+        [](Sim& s) { s.tap(258, 272); },                                                    // grün
+        [](Sim& s) { s.tap(56 + 64 * 4, 297); },                                            // 5 Sterne
+        [](Sim& s) { s.drag(84, 300, 270, 280, 0.8f); },                                    // Hund in die Hütte
+        [](Sim& s) { s.tap(262, 270); },                                                    // große Maus
+        [](Sim& s) { s.tap(154, 146); s.wait(0.3f); s.popBalloons(); },                     // erst blau (falsch), dann die roten
+        [](Sim& s) { s.rub(); },                                                            // Hund streicheln
+        [](Sim& s) { s.side(); },                                                           // weniger Mäuse
+        [](Sim& s) { s.slot3(); },                                                          // Fledermaus
+        [](Sim& s) { s.tap(110, 282); },                                                    // Maus unter Bonbons
     };
     for (int i = 0; i < bc::SMALL_LEVELS; i++) {
       sim.game.startLevel(i);

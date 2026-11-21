@@ -19,6 +19,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+#include <algorithm>
 #include <cmath>
 
 #include "amoled18.h"
@@ -158,7 +159,11 @@ static void audioTask(void*) {
   }
 }
 
-static volatile float voiceLevel = 0, micDb = -120;
+// Pusten/Rufen: nur was nah am Gerät laut ist zählt. Der Pegel muss deutlich über dem Grundrauschen UND über
+// einer festen Schwelle liegen; Gespräche im Raum (Büro: um −40 dBFS) lösen nichts aus.
+static constexpr float MIC_ABS_DB = -30;   // darunter nie (Gerede in ein paar Metern Abstand)
+static constexpr float MIC_FULL_DB = -12;  // so laut: voller Pegel (Pusten direkt aufs Mikrofon)
+static volatile float voiceLevel = 0, micDb = -120, micPeak = -120;
 static void micTask(void*) {   // nur der Pegel (Pusten, Rufen), nichts wird gespeichert
   static int16_t buf[512];
   float floorDb = 0, level = 0;
@@ -170,9 +175,11 @@ static void micTask(void*) {   // nur der Pegel (Pusten, Rufen), nichts wird ges
     for (size_t i = 0; i < n; i++) { const float v = buf[2 * i]; sum += double(v) * v; }
     const float db = 10 * log10f(float(sum / n) + 1e-3f) - 90.3f;
     micDb = db;
+    if (db > micPeak) micPeak = db;
     if (++count < 60) floorDb = count == 1 ? db : floorDb + 0.2f * (db - floorDb);
     else floorDb += (db < floorDb ? 0.2f : 0.002f) * (db - floorDb);
-    const float above = (db - floorDb - 8) / 20;
+    const float start = std::max(MIC_ABS_DB, floorDb + 15);
+    const float above = (db - start) / std::max(6.f, MIC_FULL_DB - start);
     const float target = above < 0 ? 0 : above > 1 ? 1 : above;
     level += (target - level) * (target > level ? 0.5f : 0.1f);
     voiceLevel = level;
@@ -196,7 +203,7 @@ static void pollSerial() {
     int a, b, c2, d;
     if (!strcmp(line, "status")) {
       Serial.println(game->debug());
-      Serial.printf("mikrofon %.1f dBFS, pegel %.2f, imu %s, touch %s\n", float(micDb), float(voiceLevel), hw::imuOk() ? "ok" : "fehlt", hw::touchOk() ? "ok" : "fehlt");
+      Serial.printf("mikrofon %.1f dBFS (spitze %.1f), pegel %.2f, imu %s, touch %s\n", float(micDb), float(micPeak), float(voiceLevel), hw::imuOk() ? "ok" : "fehlt", hw::touchOk() ? "ok" : "fehlt");
       Serial.printf("finger %s %d %d, aufgesetzt %d mal, display %s, pmu %s\n", touchDown ? "liegt" : "weg", int(touchX), int(touchY),
                     int(touchPresses), panelWant ? "an" : "aus (Taste)", hw::pmuOk() ? "ok" : "fehlt");
     } else if (sscanf(line, "level %d", &a) == 1) {
@@ -225,6 +232,9 @@ static void pollSerial() {
       game->skipWho();
       static const char* const N[3] = {"erwachsen", "kind", "klein"};
       Serial.printf("modus %s\n", N[game->mode()]);
+    } else if (!strcmp(line, "mikro")) {   // Spitzenpegel seit dem letzten Aufruf (zum Einstellen der Schwellen)
+      Serial.printf("mikrofon spitze %.1f dBFS, jetzt %.1f dBFS, pegel %.2f\n", float(micPeak), float(micDb), float(voiceLevel));
+      micPeak = -120;
     } else if (!strcmp(line, "menu")) {
       game->openSettings();
     } else if (!strncmp(line, "sag ", 4)) {

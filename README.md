@@ -53,7 +53,7 @@ Englisch und Deutsch lassen sich auf dem Titelbild umschalten (EN/DE):
 
 ## Wer spielt? Drei Altersstufen
 
-Bei jedem Start und nach jedem Aufwecken fragt das Gerät „Wer spielt?“ (wird vorgelesen): **Klein** (3–5 Jahre, 16 Level), **Kind** (6–9 Jahre, 24 Level) oder **Erwachsen** (36 Level). Wer denselben Modus wählt, spielt dort weiter, wo er war. Jeder Modus hat eigenen Spielstand, eigene Tipps und eigene Schwierigkeit; Klein und Kind starten auf „Leicht“. Falsche Antworten sperren Kinder nur kurz (2 s, 3 s … höchstens 5 s), die Kleinen gar nicht.
+Bei jedem Start und nach jedem Aufwecken fragt das Gerät „Wer spielt?“ (wird vorgelesen): **Klein** (3–5 Jahre, 36 Level), **Kind** (6–9 Jahre, 48 Level) oder **Erwachsen** (36 Level). Wer denselben Modus wählt, spielt dort weiter, wo er war. Jeder Modus hat eigenen Spielstand, eigene Tipps und eigene Schwierigkeit; Klein und Kind starten auf „Leicht“. Falsche Antworten sperren Kinder nur kurz (2 s, 3 s … höchstens 5 s), die Kleinen gar nicht.
 
 **Klein (unter 5):** jede Aufgabe ist ganz direkt formuliert und wird vorgelesen, die Tipps auch. Keine Zahlentastatur, große Ziele, bei falschem Tippen sagt das Gerät, was es war („Das ist blau!“).
 
@@ -75,6 +75,26 @@ Bei jedem Start und nach jedem Aufwecken fragt das Gerät „Wer spielt?“ (wir
 | 14 | Tippe auf die kleine Maus |
 | 15 | Wo ist das Dreieck? |
 | 16 | Häng die Fledermaus unten an den Ast |
+| 17 | Wo ist die Eule? (drei Tiere) |
+| 18 | Tippe auf das blaue Bonbon |
+| 19 | Lass alle Ballons platzen |
+| 20 | Wie viele Bonbons? (2) |
+| 21 | Tippe auf den kleinen Elefanten |
+| 22 | Bring die Maus zum Käse |
+| 23 | Wo ist das Quadrat? |
+| 24 | Kitzel den Dino (Finger hin und her) |
+| 25 | Wo sind mehr Bonbons? |
+| 26 | Wo ist der Hase? |
+| 27 | Merk dir, wo das Bonbon ist (drei Becher) |
+| 28 | Tippe auf das grüne Bonbon |
+| 29 | Wie viele Sterne? (5) |
+| 30 | Bring den Hund in seine Hütte |
+| 31 | Tippe auf die große Maus |
+| 32 | Lass nur die roten Ballons platzen |
+| 33 | Streichel den Hund |
+| 34 | Wo sind weniger Mäuse? |
+| 35 | Wo ist die Fledermaus? |
+| 36 | Was passt nicht dazu? (Maus zwischen Bonbons) |
 
 **Kind (6–9):** Level 1–12 sind die Trickrätsel von oben, dann:
 
@@ -92,10 +112,36 @@ Bei jedem Start und nach jedem Aufwecken fragt das Gerät „Wer spielt?“ (wir
 | 22 | Kugel-Labyrinth | nur 2 Löcher |
 | 23 | Wie viele Monate haben 28 Tage? | 12 |
 | 24 | Toms Mutter hat drei Kinder: Mia, Leo und …? | TOM |
+| 25 | Hahn legt ein Ei auf die Dachspitze | GAR NICHT |
+| 26 | Hütchenspiel, Becher werden 4× vertauscht | dem Bonbon folgen |
+| 27 | Was hat Zähne, kann aber nicht beißen? | KAMM |
+| 28 | Beine einer Spinne | 8 |
+| 29 | 5 – 10 – 15 – ? – 25 | 20 |
+| 30 | 5 Äpfel, du nimmst 3: wie viele hast DU? | 3 |
+| 31 | Merk dir die Zahl (5 Ziffern, 3 s) | jedes Mal neu |
+| 32 | Mit welcher Hand rührst du den Kakao um? | LÖFFEL |
+| 33 | Räder von 3 Bussen | 12 |
+| 34 | Lisa > Tom > Ben: wer ist am kleinsten? | BEN |
+| 35 | Ballons der Reihe nach 1–6 | Fehler: alle kommen zurück |
+| 36 | 1 – 3 – 5 – ? – 9 | 7 |
+| 37 | Heute Montag, übermorgen? | MITTWOCH |
+| 38 | Farbfolge nachtippen | 5 Farben |
+| 39 | Was gehört nicht dazu? | KAROTTE |
+| 40 | 6 Hasen, 2 weg, 3 dazu | 7 |
+| 41 | Stroop-Sprint | 6 Schriftfarben in 15 s |
+| 42 | Ecken eines Würfels | 8 |
+| 43 | 10 – 8 – 6 – ? – 2 | 4 |
+| 44 | Welcher Vogel kann nicht fliegen? | PINGUIN |
+| 45 | Kugel-Labyrinth | 3 Löcher |
+| 46 | Verdoppelt plus 2 ergibt 10 | 4 |
+| 47 | Papa 35, Mama 3 Jahre jünger | 32 |
+| 48 | 1 – 2 – 4 – ? – 16 | 8 |
 
 ## Einstellungen
 
 Von oben nach unten wischen (überall, auch im Level) öffnet die Einstellungen: Helligkeit (4 Stufen), Lautstärke, Sprache, Wer spielt?, **Alles auf 0 zurücksetzen** (alle drei Modi, Intro von vorn) und **Ausschalten**. Die letzten beiden fragen nach („Wirklich? Nochmal tippen!“). Schließen mit FERTIG oder nach oben wischen.
+
+**Pusten und Rufen** zählen nur, wenn es nah am Gerät laut ist: Der Pegel muss über −30 dBFS liegen (voll bei −12 dBFS) und deutlich über dem Grundrauschen. Gespräche im Raum (Büro: um −40 dBFS) lösen nichts aus. Die erste Sekunde nach LOS hört das Level noch nicht hin. Die Schwellen stehen oben in `micTask` (`firmware/main.cpp`); `mikro` zeigt den Spitzenpegel zum Nachjustieren.
 
 Neue Sätze nachsprechen lassen, ohne die vorhandenen Clips zu ändern: `HEYGEN_API_KEY=… python3 tools/mkvoice.py --fehlende`.
 
@@ -140,7 +186,7 @@ pio run -e amoled216 -t upload
 
 Zum Display gehen nur die 16-Pixel-Bänder, die sich seit dem letzten Bild geändert haben (das Panel hat keinen TE-Ausgang; ein ständig neu geschriebenes Vollbild flackerte).
 
-Die Partitionstabelle `partitions.csv` hat eine große App (12,5 MB) statt zwei OTA-Hälften, weil die Sprach-Clips eingebettet sind.
+Die Partitionstabelle `partitions.csv` hat eine große App (15,9 MB) statt zwei OTA-Hälften, ohne SPIFFS, weil die Sprach-Clips eingebettet sind.
 
 Die Plattform ist auf pioarduino `55.03.313` (Arduino-Core 3.3) festgelegt. Die aktuelle „stable“ bringt Core 4.0 mit, damit kompiliert GFX Library 1.6.8 nicht mehr.
 
@@ -149,11 +195,12 @@ Serielle Befehle (115200 Baud, `pio device monitor`):
 | Befehl | Wirkung |
 |---|---|
 | `status` | Bildschirm, Level, gelöste Level, Tipps, Neigung, Mikrofonpegel |
-| `level N` | Level N starten (Erwachsen 1–36, Kind 1–24, Klein 1–16) |
+| `level N` | Level N starten (Erwachsen 1–36, Kind 1–48, Klein 1–36) |
 | `stufe N` | Schwierigkeit: 0 leicht, 1 normal, 2 schwer |
 | `laut N` | Lautstärke 0 (stumm) bis 3 |
 | `modus klein`, `modus kind`, `modus erwachsen` | Altersstufe wählen |
 | `menu` | Einstellungen öffnen |
+| `mikro` | Spitzenpegel des Mikrofons seit dem letzten Aufruf |
 | `sag KEY` | Sprach-Clip abspielen, z. B. `sag de_t05` |
 | `tipp X Y`, `wisch X0 Y0 X1 Y1` | Berührung nachstellen |
 | `klopf N` | N Schläge auf den Tisch nachstellen |
