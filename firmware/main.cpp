@@ -66,6 +66,10 @@ static TouchSample fakeTouch[24];
 static int fakeTouchN = 0;
 static AccelSample accQ[128];
 static int accHead = 0, accCount = 0;
+static volatile int touchPresses = 0;   // für „status“: wie oft der Finger aufgesetzt wurde
+static volatile bool touchDown = false;
+static volatile int buttonEvent = 0;   // hw::Button vom Eingabe-Task an loop()
+static volatile int16_t touchX = 0, touchY = 0;
 
 static void inputTask(void*) {
   bool wasDown = false;
@@ -73,6 +77,8 @@ static void inputTask(void*) {
   uint32_t lastTouch = 0;
   for (;;) {
     const uint32_t now = millis();
+    const hw::Button be = hw::pollButtons();
+    if (be != hw::Button::Idle) buttonEvent = int(be);
     float v[3];
     if (hw::readAccel(v)) {
       AccelSample s{IMU_X_SIGN * v[IMU_X_SRC], IMU_Y_SIGN * v[IMU_Y_SRC], IMU_Z_SIGN * v[IMU_Z_SRC], now};
@@ -93,8 +99,10 @@ static void inputTask(void*) {
         if (touchN < 32) touchQ[touchN++] = s;
         else touchQ[31] = s;
         portEXIT_CRITICAL(&inMux);
+        if (down && !wasDown) touchPresses = touchPresses + 1;
         wasDown = down;
         lx = x; ly = y;
+        touchDown = down; touchX = x; touchY = y;
       }
     }
     vTaskDelay(pdMS_TO_TICKS(2));
@@ -108,6 +116,8 @@ static constexpr int BAND = 16, NBUF = 4, PW = hw::PANEL_W;
 struct Band { uint16_t* buf; int16_t y; };
 static QueueHandle_t freeQ, fullQ;
 static volatile int brightness = 0, curBrightness = -1;
+static volatile bool panelWant = true;   // false: Panel per Taste ausgeschaltet
+static bool panelIs = true;
 
 static void displayTask(void*) {
   auto* gfx = hw::panel();
@@ -115,6 +125,7 @@ static void displayTask(void*) {
     Band b;
     xQueueReceive(fullQ, &b, portMAX_DELAY);
     if (b.y == 0 || !b.buf) {
+      if (panelIs != panelWant) { panelIs = panelWant; if (panelIs) gfx->displayOn(); else gfx->displayOff(); }
       if (curBrightness != brightness) { curBrightness = brightness; gfx->setBrightness(curBrightness); }
       if (!b.buf) continue;   // nur Helligkeit setzen
       gfx->startWrite();
@@ -175,6 +186,8 @@ static void pollSerial() {
     if (!strcmp(line, "status")) {
       Serial.println(game->debug());
       Serial.printf("mikrofon %.1f dBFS, pegel %.2f, imu %s, touch %s\n", float(micDb), float(voiceLevel), hw::imuOk() ? "ok" : "fehlt", hw::touchOk() ? "ok" : "fehlt");
+      Serial.printf("finger %s %d %d, aufgesetzt %d mal, display %s, pmu %s\n", touchDown ? "liegt" : "weg", int(touchX), int(touchY),
+                    int(touchPresses), panelWant ? "an" : "aus (Taste)", hw::pmuOk() ? "ok" : "fehlt");
     } else if (sscanf(line, "level %d", &a) == 1) {
       game->startLevel(a - 1);
       Serial.printf("level %d\n", a);
@@ -239,6 +252,37 @@ void loop() {
   static Input in;
 
   pollSerial();
+  // Tasten: Display aus/an (Spiel pausiert, Touch wird ignoriert) und Ausschalten
+  static bool forcedOff = false;
+  const int be = buttonEvent;
+  if (be) {
+    buttonEvent = 0;
+    if (be == int(hw::Button::ScreenToggle)) {
+      forcedOff = !forcedOff;
+      panelWant = !forcedOff;
+      if (!forcedOff) game->wake(millis());
+      Serial.printf("display %s\n", forcedOff ? "aus" : "an");
+    } else if (be == int(hw::Button::PowerOff)) {
+      Serial.println("ausschalten");
+      brightness = 0;
+      panelWant = false;
+      Band b{nullptr, 0};
+      xQueueSend(fullQ, &b, portMAX_DELAY);
+      delay(200);
+      hw::powerOff();
+    }
+  }
+  if (forcedOff) {
+    portENTER_CRITICAL(&inMux);
+    touchN = 0;
+    accCount = 0;
+    portEXIT_CRITICAL(&inMux);
+    brightness = 0;
+    Band b{nullptr, 0};
+    xQueueSend(fullQ, &b, portMAX_DELAY);
+    delay(50);
+    return;
+  }
   const uint32_t t0 = micros();
   {   // fällige künstliche Berührungen einreihen
     const uint32_t now = millis();

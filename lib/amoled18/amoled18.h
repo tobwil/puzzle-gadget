@@ -43,6 +43,13 @@ I2SClass& i2s();
 
 inline bool bootPressed() { return digitalRead(PIN_BOOT) == LOW; }
 
+// Tasten (AMOLED-2.16): Power-Taste über den AXP2101 (kurz/lang), Taste an GPIO18.
+// pollButtons() regelmäßig aus genau einem Task aufrufen (liest den PMU per I²C alle 100 ms).
+enum class Button : uint8_t { Idle, ScreenToggle, PowerOff };
+Button pollButtons();
+void powerOff();   // Gerät über den PMU ausschalten (einschalten: Power-Taste)
+bool pmuOk();
+
 // TF-Karte: SDMMC 1-Bit (CLK 2, CMD 1, D0 3, laut Waveshare-Beispiel), eingehängt unter /sd. false = keine Karte
 bool sdBegin();
 

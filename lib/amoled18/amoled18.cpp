@@ -9,6 +9,8 @@
 #ifdef BOARD_AMOLED216
 #include "TouchDrvCSTXXX.hpp"
 #include "es7210.h"
+#define XPOWERS_CHIP_AXP2101
+#include "XPowersLib.h"
 #endif
 
 namespace amoled18 {
@@ -24,6 +26,7 @@ namespace amoled18 {
 #define TP_INT 11
 #define TP_RST 40
 #define I2S_MCK 42
+#define KEY3 18   // Taste an GPIO18 (gegen GND, 10k Pull-up)
 #else
 #define LCD_SCLK 11
 #define LCD_RST GFX_NOT_DEFINED   // Reset über den IO-Expander
@@ -39,8 +42,8 @@ static Arduino_DataBus* bus_ = new Arduino_ESP32QSPI(LCD_CS, LCD_SCLK, LCD_SDIO0
 static Arduino_CO5300* panel_ = new Arduino_CO5300(bus_, LCD_RST, 0, PANEL_W, PANEL_H, 0, 0, 0, 0);
 static TouchDrvCST92xx touch_;
 static bool touchOk_ = false;
-static volatile bool touchIrq_ = false;
-static void IRAM_ATTR onTouchIrq() { touchIrq_ = true; }
+static XPowersPMU pmu_;
+static bool pmuOk_ = false;
 #else
 static Arduino_CO5300* panel_ = new Arduino_CO5300(bus_, LCD_RST, 0, LCD_W, LCD_H, 16, 0, 0, 0);   // Spaltenversatz 16
 #endif
@@ -81,14 +84,24 @@ bool begin() {
   panel_->fillScreen(0xFFFF);    // Rand um die Spielfläche: weiß wie der Spielhintergrund
 
   // Touch CST9220: Achsen wie im Waveshare-Beispiel (zum gedrehten Bild passend)
+  // PMU: Power-Taste kurz/lang als Ereignis; nach 6 s Halten schaltet der Chip notfalls selbst ab
+  pmuOk_ = pmu_.begin(Wire, AXP2101_SLAVE_ADDRESS, PIN_SDA, PIN_SCL);
+  if (pmuOk_) {
+    pmu_.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+    pmu_.clearIrqStatus();
+    pmu_.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ | XPOWERS_AXP2101_PKEY_LONG_IRQ);
+    pmu_.setLongPressPowerOFF();
+    pmu_.enableLongPressShutdown();
+    pmu_.setPowerKeyPressOffTime(XPOWERS_POWEROFF_6S);
+  }
+  pinMode(KEY3, INPUT_PULLUP);
+
   touch_.setPins(TP_RST, TP_INT);
   touchOk_ = touch_.begin(Wire, CST92XX_SLAVE_ADDRESS);
   if (touchOk_) {
     touch_.setMaxCoordinates(PANEL_W, PANEL_H);
     touch_.setSwapXY(true);
     touch_.setMirrorXY(true, false);
-    pinMode(TP_INT, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(TP_INT), onTouchIrq, FALLING);
   }
 #else
   // IO-Expander: Display, Touch und Co. aus dem Reset holen
@@ -121,27 +134,71 @@ bool begin() {
 }
 
 #ifdef BOARD_AMOLED216
+bool pmuOk() { return pmuOk_; }
+void powerOff() { if (pmuOk_) pmu_.shutdown(); }
+
+Button pollButtons() {
+  Button ev = Button::Idle;
+  // GPIO18: entprellt, Ereignis beim Drücken
+  static bool stable = false, raw = false;
+  static uint32_t rawSince = 0;
+  const bool now = digitalRead(KEY3) == LOW;
+  if (now != raw) { raw = now; rawSince = millis(); }
+  if (raw != stable && millis() - rawSince > 30) {
+    stable = raw;
+    if (stable) ev = Button::ScreenToggle;
+  }
+  // Power-Taste: Interrupt-Status des PMU abfragen
+  static uint32_t lastPmu = 0;
+  if (pmuOk_ && millis() - lastPmu >= 100) {
+    lastPmu = millis();
+    pmu_.getIrqStatus();
+    if (pmu_.isPekeyLongPressIrq()) ev = Button::PowerOff;
+    else if (pmu_.isPekeyShortPressIrq()) ev = Button::ScreenToggle;
+    pmu_.clearIrqStatus();
+  }
+  return ev;
+}
+
 bool touchOk() { return touchOk_; }
 
 bool readTouch(bool& down, int16_t& x, int16_t& y) {
-  // Der CST9220 meldet neue Daten per INT; solange ein Finger liegt, wird weiter gelesen, damit das Loslassen ankommt.
-  static bool wasDown = false;
+  // CST9220-Protokoll wie in SensorLib (TouchDrvCST92xx::getPoint), aber mit drei Ergebnissen:
+  // kein neuer Datensatz (ACK-Byte fehlt) -> false, Zustand bleibt; losgelassen; Finger liegt.
+  // getPoint() meldet „kein neuer Datensatz“ genauso wie „losgelassen“ – ein still liegender Finger
+  // wurde dadurch ständig losgelassen und neu aufgesetzt (Ei-Level, Halten, Ziehen).
   if (!touchOk_) return false;
-  if (!touchIrq_ && !wasDown) return false;
-  touchIrq_ = false;
-  int16_t px[1], py[1];
-  const uint8_t n = touch_.getPoint(px, py, 1);
-  down = n > 0;
-  wasDown = down;
+  uint8_t b[15] = {};
+  Wire.beginTransmission(CST92XX_SLAVE_ADDRESS);
+  Wire.write(0xD0);
+  Wire.write(0x00);
+  if (Wire.endTransmission(true) != 0) return false;
+  if (Wire.requestFrom(uint8_t(CST92XX_SLAVE_ADDRESS), uint8_t(sizeof b)) != sizeof b) return false;
+  for (auto& v : b) v = Wire.read();
+  Wire.beginTransmission(CST92XX_SLAVE_ADDRESS);   // Datensatz quittieren
+  Wire.write(0xD0);
+  Wire.write(0x00);
+  Wire.write(0xAB);
+  Wire.endTransmission(true);
+  if (b[6] != 0xAB) return false;   // nichts Neues
+  const uint8_t n = b[5] & 0x7F;
+  down = n > 0 && n <= 2 && (b[0] & 0x0F) == 0x06;
   if (down) {
-    x = px[0] - OFF_X;
-    y = py[0] - OFF_Y;
+    const int16_t rx = int16_t((b[1] << 4) | (b[3] >> 4)), ry = int16_t((b[2] << 4) | (b[3] & 0x0F));
+    int16_t px = ry, py = rx;   // Achsen tauschen, dann x spiegeln (wie setSwapXY(true), setMirrorXY(true, false))
+    px = int16_t(PANEL_W - px);
+    x = px - OFF_X;
+    y = py - OFF_Y;
     if (x < 0) x = 0; else if (x >= LCD_W) x = LCD_W - 1;
     if (y < 0) y = 0; else if (y >= LCD_H) y = LCD_H - 1;
   }
   return true;
 }
 #else
+bool pmuOk() { return false; }
+void powerOff() {}
+Button pollButtons() { return Button::Idle; }
+
 bool touchOk() { return true; }
 
 bool readTouch(bool& down, int16_t& x, int16_t& y) {

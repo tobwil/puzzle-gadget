@@ -67,6 +67,15 @@ Tipps: Am Anfang gibt es 15, jedes erstmals gelöste Level bringt einen dazu. Ei
 
 Nach 90 s ohne Berührung wird das Display dunkler, nach 4 min geht es aus. Ein Tipp weckt es wieder (dieser erste Tipp zählt nicht als Spielzug).
 
+**Tasten (AMOLED-2.16):**
+
+| Taste | Wirkung |
+|---|---|
+| Power kurz | Display aus/an (das Spiel pausiert, Touch wird ignoriert) |
+| Power lang (ca. 1,5 s) | Gerät ausschalten; einschalten wieder mit der Power-Taste (nach 6 s schaltet der Power-Chip notfalls selbst ab) |
+| Taste an GPIO18 | Display aus/an |
+| BOOT | bleibt frei (zum Flashen) |
+
 ## Bauen und flashen
 
 PlatformIO (`pip install platformio`), Gerät per USB-C anstecken:

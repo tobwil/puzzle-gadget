@@ -17,6 +17,7 @@ class Game : Host {
 
   int brightness() const { return bright_; }   // 0..255
   bool screenOff() const { return off_; }
+  void wake(uint32_t ms) { lastActive_ = ms; off_ = false; }   // nach „Display aus“ per Taste
   void startLevel(int i);   // für Tests und den seriellen Befehl „level N“ (ohne Aufgabenkarte)
   void enterLevel(int i);   // mit Aufgabenkarte (und vorgelesener Aufgabe)
   void resetProgress();
