@@ -17,7 +17,8 @@ class Game : Host {
 
   int brightness() const { return bright_; }   // 0..255
   bool screenOff() const { return off_; }
-  void wake(uint32_t ms) { lastActive_ = ms; off_ = false; }   // nach „Display aus“ per Taste
+  void wake(uint32_t ms) { lastActive_ = ms; off_ = false; askWho(); }   // nach „Display aus“ per Taste: wieder fragen, wer spielt
+  void askWho();   // „Wer spielt?“ zeigen; gleicher Modus gewählt: weiter, wo man war
   void startLevel(int i);   // für Tests und den seriellen Befehl „level N“ (ohne Aufgabenkarte)
   void enterLevel(int i);   // mit Aufgabenkarte (und vorgelesener Aufgabe)
   void resetProgress();
@@ -78,6 +79,7 @@ class Game : Host {
   dk::Store& store_;
   Level* levels_[LEVELS] = {};
   bool kids_ = false, whoSpoken_ = false;
+  int whoBack_ = -1, whoBackOverlay_ = 0;   // wohin es nach „Wer spielt?“ zurückgeht (-1: zum Titel)
   mutable char key_[16];
   Screen screen_ = WHO;
   Overlay overlay_ = NONE;

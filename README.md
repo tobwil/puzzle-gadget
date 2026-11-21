@@ -72,7 +72,9 @@ Die 24 Kinder-Level: 1–12 sind dieselben Trickrätsel wie oben, dann:
 | 23 | Wie viele Monate haben 28 Tage? | 12 |
 | 24 | Toms Mutter hat drei Kinder: Mia, Leo und …? | TOM |
 
-Sprach-Clips für die Kinder-Aufgaben 13–24 (`k13`…`k24`) und die Frage „Wer spielt?“ (`who`) fehlen noch in `firmware/voice.bin`; bis dahin bleiben diese Karten stumm. Nachholen mit `tools/mkvoice.py` (erzeugt alle Clips neu).
+Nach dem Aufwecken (Power kurz, Taste an GPIO18 oder Tippen nach dem automatischen Abschalten) fragt das Gerät wieder, wer spielt. Wer denselben Modus wählt, spielt dort weiter, wo er war.
+
+Neue Sätze nachsprechen lassen, ohne die vorhandenen Clips zu ändern: `HEYGEN_API_KEY=… python3 tools/mkvoice.py --fehlende`.
 
 Tipps: Am Anfang gibt es 15, jedes erstmals gelöste Level bringt einen dazu. Ein Tipp kostet beim ersten Ansehen pro Level einen. Mit „>>“ lässt sich ein Level für 3 Tipps überspringen. Spielstand, Tipps, Sprache, Lautstärke, Schwierigkeit und Bestzeiten bleiben im NVS gespeichert.
 
@@ -112,6 +114,8 @@ Für das **Waveshare ESP32-S3-Touch-AMOLED-2.16** (480×480, Touch CST9220, Mikr
 ```bash
 pio run -e amoled216 -t upload
 ```
+
+Die Partitionstabelle `partitions.csv` hat eine große App (12,5 MB) statt zwei OTA-Hälften, weil die Sprach-Clips eingebettet sind.
 
 Die Plattform ist auf pioarduino `55.03.313` (Arduino-Core 3.3) festgelegt. Die aktuelle „stable“ bringt Core 4.0 mit, damit kompiliert GFX Library 1.6.8 nicht mehr.
 

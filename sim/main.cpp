@@ -320,6 +320,19 @@ static int tour(const char* dir) {
     sim.game.enterLevel(12);
     sim.wait(0.6f);
     sim.shot("kind_karte");
+    // Display aus/an mitten im Level: erst „Wer spielt?“, gleicher Modus geht im Level weiter
+    sim.tap(184, 358);
+    sim.game.wake(sim.ms);
+    sim.wait(0.3f);
+    sim.tap(100, 230);
+    sim.wait(0.3f);
+    if (std::strncmp(sim.game.debug(), "screen 2 modus kind level 13 overlay 0", 38)) { printf("Aufwecken: %s\n", sim.game.debug()); fails++; }
+    sim.game.wake(sim.ms);   // anderer Modus: zum Titelbild der Erwachsenen
+    sim.wait(0.3f);
+    sim.tap(268, 230);
+    sim.wait(0.3f);
+    if (std::strncmp(sim.game.debug(), "screen 0 modus erwachsen", 24)) { printf("Moduswechsel: %s\n", sim.game.debug()); fails++; }
+    sim.shot("titel_erwachsen");
   }
   printf("%d Level nicht gelöst, %d Textprobleme\n", fails, nIssues);
   return fails || nIssues ? 1 : 0;

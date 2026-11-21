@@ -47,7 +47,7 @@ const Txt T_GENIUS{"GENIUS!", "GENIAL!"}, T_ALL{"All %d puzzles solved.", "Alle 
 const Txt T_WHO{"WHO IS PLAYING?", "WER SPIELT?"}, T_KID{"CHILD", "KIND"}, T_ADULT{"ADULT", "ERWACHSEN"};
 const Txt T_KIDSUB{"easier puzzles", "leichtere Rätsel"}, T_ADULTSUB{"hard puzzles", "schwere Rätsel"};
 const Txt T_WHOLATER{"You can change this on the title screen.", "Das kannst du auf dem Titelbild ändern."};
-const Txt T_MODE[2] = {{"ADULT", "ERWACHSEN"}, {"CHILD", "KIND"}};
+const Txt T_MODE[2] = {{"Adult", "Erwachsen"}, {"Child", "Kind"}};
 const Txt T_WHOSAY{"Who is playing? A child or an adult?", "Wer spielt? Ein Kind oder ein Erwachsener?"};
 const char* const PRAISE[2][5] = {{"NICE!", "BRAVO!", "WOW!", "SMART!", "GENIUS!"}, {"STARK!", "BRAVO!", "WOW!", "SUPER!", "GENIAL!"}};
 const Txt NOPES[] = {{"Nope!", "Nö!"}, {"Hmm… no.", "Hmm… nein."}, {"Not quite!", "Nicht ganz!"}, {"Try again!", "Nochmal!"}};
@@ -98,6 +98,15 @@ void Game::setMode(bool kids) {
   loadProgress();
   overlay_ = NONE;
   pickPage_ = 0;
+}
+
+void Game::askWho() {
+  if (screen_ == WHO) return;
+  whoBack_ = screen_;
+  whoBackOverlay_ = overlay_;
+  overlay_ = NONE;
+  screen_ = WHO;
+  whoSpoken_ = false;
 }
 
 void Game::save() {
@@ -262,7 +271,7 @@ void Game::tick(const dk::Input& in) {
     lastActive_ = in.ms;
     if (t.down && !down_) {
       down_ = true;
-      if (off_) { wake_ = true; off_ = false; }   // aus dem Schwarzen: erster Tipp weckt nur
+      if (off_) { wake_ = true; off_ = false; askWho(); }   // aus dem Schwarzen: erster Tipp weckt nur und fragt, wer spielt
       pressed = true; px = sx_ = x_ = lx_ = t.x; py = sy_ = y_ = ly_ = t.y; downMs_ = t.ms;
       vx_ = vy_ = 0;
     } else if (t.down) {
@@ -376,9 +385,16 @@ void Game::tap(float x, float y) {
     case WHO:
       if (inRect(x, y, 280, 8, 80, 56)) { lang_ ^= 1; store_.set("bc_lang", lang_); sfx(SFX_CLICK); }
       else if (inRect(x, y, 18, 108, 166, 240) || inRect(x, y, 184, 108, 166, 240)) {
-        setMode(x < 184);
+        const bool kid = x < 184;
         sfx(SFX_POP);
-        screen_ = store_.get("bc_intro", 0) ? TITLE : INTRO;
+        if (kid == kids_ && whoBack_ >= 0) {   // gleicher Modus: weiter, wo man war
+          screen_ = Screen(whoBack_);
+          overlay_ = Overlay(whoBackOverlay_);
+        } else {
+          setMode(kid);
+          screen_ = store_.get("bc_intro", 0) ? TITLE : INTRO;
+        }
+        whoBack_ = -1;
       }
       break;
     case INTRO:
@@ -396,7 +412,7 @@ void Game::tap(float x, float y) {
       else if (inRect(x, y, 214, 8, 62, 56)) { setVolume((vol_ + 1) & 3); store_.set("bc_vol", vol_); sfx(SFX_CLICK); }
       else if (inRect(x, y, 156, 8, 56, 56)) { screen_ = INTRO; introPage_ = 0; sfx(SFX_CLICK); }
       else if (inRect(x, y, 22, 190, 150, 44)) { setDifficulty(diff_ + 1); sfx(SFX_CLICK); }
-      else if (inRect(x, y, 22, 236, 150, 44)) { screen_ = WHO; whoSpoken_ = false; sfx(SFX_CLICK); }
+      else if (inRect(x, y, 22, 236, 150, 46)) { askWho(); sfx(SFX_CLICK); }
       break;
     case PICK:
       if (y < 72 && x < 80) { screen_ = TITLE; sfx(SFX_CLICK); break; }
@@ -495,11 +511,12 @@ void Game::drawTitle(Scene& s) {
   for (int i = 0; i < 3; i++) s.rrect(44 + i * 7, 220 - 6 - i * 4, 5, 8 + i * 4, 1.5f, i <= diff_ ? DC[diff_] : G3);
   s.text(fonts::label, tr(T_DIFF[diff_], lang_), 104, 204, INK, 1, Align::Center);
   // Wer spielt (führt zurück zur Auswahl)
-  s.rrect(30, 242, 126, 34, 17, BTN);
-  const float hk = kids_ ? 0.8f : 1.f;   // kleines Männchen, beim Kind kleiner
-  s.circle(51, 262 - 12 * hk, 4.5f * hk, kids_ ? HOTPINK : INK);
-  s.capsule(51, 264 - 5 * hk, 51, 268, 4.5f * hk, kids_ ? HOTPINK : INK);
-  s.text(fonts::label, tr(T_MODE[kids_], lang_), 108, 250, INK, 1, Align::Center);
+  const bool mDown = down_ && uiTouch_ && inRect(sx_, sy_, 22, 236, 150, 46);
+  s.rrect(30, 242, 126, 34, 17, mDown ? BTN_DOWN : kids_ ? YELLOW : hex(0xE9FDFE));
+  s.text(fonts::label, tr(T_MODE[kids_], lang_), 85, 250, INK, 1, Align::Center);
+  // Wechsel-Symbol: zwei Pfeile
+  s.capsule(138, 254, 150, 254, 1.6f, INK); s.capsule(146, 250, 150, 254, 1.6f, INK);
+  s.capsule(138, 264, 150, 264, 1.6f, INK); s.capsule(138, 264, 142, 268, 1.6f, INK);
   // oben rechts: Anleitung, Ton und Sprache
   s.circle(184, 35, 17, BTN);
   s.text(fonts::heavy, "?", 184, 18, INK, 1, Align::Center);

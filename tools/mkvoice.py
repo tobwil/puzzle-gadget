@@ -9,6 +9,7 @@ Danach: 16 kHz Mono, Stille abschneiden, normalisieren, G.711 µ-law (8 Bit).
 Ergebnis: firmware/voice.bin (alle Clips hintereinander) und firmware/voice_index.h (Schlüssel, Versatz, Länge).
 
     make -C sim && HEYGEN_API_KEY=... python3 tools/mkvoice.py
+    make -C sim && HEYGEN_API_KEY=... python3 tools/mkvoice.py --fehlende   # vorhandene Clips behalten, nur neue sprechen
 """
 import json
 import os
@@ -126,8 +127,21 @@ def to_clip(raw, short=False):
     return bytes(ulaw(int(v * gain)) for v in pcm)
 
 
+def existing_clips():
+    """Vorhandene Clips aus firmware/voice_index.h und voice.bin (Schlüssel -> Bytes)."""
+    try:
+        with open(os.path.join(ROOT, "firmware", "voice_index.h"), encoding="utf-8") as f:
+            idx = re.findall(r'\{"(\w+)", (\d+), (\d+)\}', f.read())
+        with open(os.path.join(ROOT, "firmware", "voice.bin"), "rb") as f:
+            blob = f.read()
+    except FileNotFoundError:
+        return {}
+    return {k: blob[int(o):int(o) + int(n)] for k, o, n in idx}
+
+
 def main():
     use_say = "--say" in sys.argv
+    keep = existing_clips() if "--fehlende" in sys.argv else {}
     key = os.environ.get("HEYGEN_API_KEY", "")
     if not use_say and not key:
         raise SystemExit("HEYGEN_API_KEY fehlt (oder --say für die macOS-Stimmen)")
@@ -138,7 +152,11 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for k, text in entries:
             lang = k[:2]
-            clip = to_clip(pcm_say(text, lang, tmp) if use_say else pcm_heygen(text, lang, key, tmp), len(text) <= 16)
+            if k in keep:
+                clip = keep[k]
+            else:
+                clip = to_clip(pcm_say(text, lang, tmp) if use_say else pcm_heygen(text, lang, key, tmp), len(text) <= 16)
+                print("  neu:", end=" ")
             index.append((k, len(blob), len(clip)))
             blob += clip
             print(f"{k:8s} {len(clip) / RATE:4.1f} s  {text}")
