@@ -149,14 +149,19 @@ def main():
     entries = [l.split("\t", 1) for l in lines.splitlines() if "\t" in l]
     blob = bytearray()
     index = []
+    seen = {}   # (Sprache, Text) -> (Versatz, Länge): gleiche Sätze teilen sich einen Clip
     with tempfile.TemporaryDirectory() as tmp:
         for k, text in entries:
             lang = k[:2]
+            if (lang, text) in seen:
+                index.append((k, *seen[(lang, text)]))
+                continue
             if k in keep:
                 clip = keep[k]
             else:
                 clip = to_clip(pcm_say(text, lang, tmp) if use_say else pcm_heygen(text, lang, key, tmp), len(text) <= 16)
                 print("  neu:", end=" ")
+            seen[(lang, text)] = (len(blob), len(clip))
             index.append((k, len(blob), len(clip)))
             blob += clip
             print(f"{k:8s} {len(clip) / RATE:4.1f} s  {text}")

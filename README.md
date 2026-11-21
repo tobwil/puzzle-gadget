@@ -10,7 +10,7 @@ Englisch und Deutsch lassen sich auf dem Titelbild umschalten (EN/DE):
 
 ## Die Level
 
-36 Rätsel für Erwachsene. Level 1–12 sind Trickrätsel, die die Fähigkeiten des Geräts nutzen. Level 13–36 sind harte Denkaufgaben: Denkfallen, Logik, Kopfrechnen, Gedächtnis und Geschick. Zahlenantworten kommen über eine Tastatur. Jede falsche Antwort sperrt die Eingabe länger (4 s, 8 s, 16 s, höchstens 30 s), damit sich Durchprobieren nicht lohnt.
+36 Rätsel für Erwachsene. Level 1–12 sind Trickrätsel, die die Fähigkeiten des Geräts nutzen. Level 13–36 sind harte Denkaufgaben: Denkfallen, Logik, Kopfrechnen, Gedächtnis und Geschick. Zahlenantworten kommen über eine Tastatur mit großen Tasten; Neustart und Tipp liegen dann als kleine Kreise in den unteren Ecken, damit man sie nicht aus Versehen trifft. Jede falsche Antwort sperrt die Eingabe länger (4 s, 8 s, 16 s, höchstens 30 s), damit sich Durchprobieren nicht lohnt.
 
 | LVL | Aufgabe | Lösung (Spoiler) |
 |---|---|---|
@@ -137,13 +137,22 @@ Bei jedem Start und nach jedem Aufwecken fragt das Gerät „Wer spielt?“ (wir
 | 47 | Papa 35, Mama 3 Jahre jünger | 32 |
 | 48 | 1 – 2 – 4 – ? – 16 | 8 |
 
+## Zufall: jedes Mal anders
+
+- **Gemischt bei jedem Spiel:** Merkzahlen, Farbfolgen, Hütchenspiel und Stroop würfeln bei jedem Start neu (auf dem Gerät aus `esp_random()`). Farben, Formen, Tiere, Ballons, welche Seite mehr hat und wo das Andere liegt werden bei jedem Spiel neu angeordnet.
+- **Zufallsmodus** (gelber Würfel auf dem Titelbild): endlos neue Aufgaben mit Serienzähler und Rekord je Altersstufe. Gemischt aus den festen Leveln der Stufe und frisch gewürfelten Aufgaben:
+  - Klein: Farben, zählen (1–5), groß/klein, Formen, Tiere finden, mehr/weniger, Ballons, Becher, was passt nicht, ziehen, kitzeln – alles mit Ansage.
+  - Kind: Rechnen bis 20 und kleines Einmaleins (auch als Geschichten), Zahlenreihen, Kettenrechnung, Zahl merken, Farbfolge, Hütchenspiel, Ballons der Reihe nach, Stroop, Labyrinth.
+  - Erwachsen: Kopfrechnen mit Kniff (Prozent, Rabatt, Wurzeln, a² – b², Minuten), Zahlenreihen (auch Quadrat- und Fibonacci-Reihen), Kettenrechnung mit 5 Schritten, 7 Ziffern merken, Farbfolge, Hütchenspiel mit 8 Tauschen, Stroop, Labyrinth.
+  - Tipps sind im Zufallsmodus gratis; >> würfelt eine neue Aufgabe (die Serie beginnt dann von vorn). Der Spielstand der Level bleibt unberührt.
+
 ## Einstellungen
 
 Von oben nach unten wischen (überall, auch im Level) öffnet die Einstellungen: Helligkeit (4 Stufen), Lautstärke, Sprache, Wer spielt?, **Alles auf 0 zurücksetzen** (alle drei Modi, Intro von vorn) und **Ausschalten**. Die letzten beiden fragen nach („Wirklich? Nochmal tippen!“). Schließen mit FERTIG oder nach oben wischen.
 
 **Pusten und Rufen** zählen nur, wenn es nah am Gerät laut ist: Der Pegel muss über −30 dBFS liegen (voll bei −12 dBFS) und deutlich über dem Grundrauschen. Gespräche im Raum (Büro: um −40 dBFS) lösen nichts aus. Die erste Sekunde nach LOS hört das Level noch nicht hin. Die Schwellen stehen oben in `micTask` (`firmware/main.cpp`); `mikro` zeigt den Spitzenpegel zum Nachjustieren.
 
-Neue Sätze nachsprechen lassen, ohne die vorhandenen Clips zu ändern: `HEYGEN_API_KEY=… python3 tools/mkvoice.py --fehlende`.
+Neue Sätze nachsprechen lassen, ohne die vorhandenen Clips zu ändern (gleiche Sätze teilen sich einen Clip): `HEYGEN_API_KEY=… python3 tools/mkvoice.py --fehlende`.
 
 Tipps: Am Anfang gibt es 15, jedes erstmals gelöste Level bringt einen dazu. Ein Tipp kostet beim ersten Ansehen pro Level einen. Mit „>>“ lässt sich ein Level für 3 Tipps überspringen. Spielstand, Tipps, Sprache, Lautstärke, Schwierigkeit und Bestzeiten bleiben im NVS gespeichert.
 
@@ -200,6 +209,7 @@ Serielle Befehle (115200 Baud, `pio device monitor`):
 | `laut N` | Lautstärke 0 (stumm) bis 3 |
 | `modus klein`, `modus kind`, `modus erwachsen` | Altersstufe wählen |
 | `menu` | Einstellungen öffnen |
+| `zufall` | Zufallsmodus starten (gibt die Lösung aus) |
 | `mikro` | Spitzenpegel des Mikrofons seit dem letzten Aufruf |
 | `sag KEY` | Sprach-Clip abspielen, z. B. `sag de_t05` |
 | `tipp X Y`, `wisch X0 Y0 X1 Y1` | Berührung nachstellen |

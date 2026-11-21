@@ -77,9 +77,18 @@ class Level {
   virtual int tools() const { return TOOL_FINGER; }
   // Lösung als Ziffernfolge (für die Simulator-Tour); nullptr, wenn das Level keine hat
   virtual const char* answer() const { return nullptr; }
+  virtual bool hasPad() const { return false; }   // true: Level hat die Zahlentastatur (Knöpfe unten werden klein)
+  // Sprach-Clips für Aufgabe und Tipp, wenn das Level sie selbst kennt (Zufalls-Varianten), ohne Sprachkürzel
+  virtual const char* voiceKey() const { return nullptr; }
+  virtual const char* hintKey() const { return nullptr; }
   bool solved = false;
   bool kids = false;   // Kinder-Modus: kürzere Sperren nach falschen Antworten
 };
+
+// Zufall (levels.cpp)
+void seedRandom(uint32_t s);
+uint32_t rnd();
+inline int rndi(int n) { return int(rnd() % uint32_t(n)); }
 
 constexpr int LEVELS = 36;       // Erwachsene
 constexpr int KID_LEVELS = 48;   // Kinder
@@ -88,6 +97,8 @@ Level* makeLevel(int i);      // 0 .. LEVELS-1
 Level* makeKidLevel(int i);   // 0 .. KID_LEVELS-1 (0–11 wie bei den Erwachsenen)
 constexpr int SMALL_LEVELS = 36;   // Kleine (unter 5)
 Level* makeSmallLevel(int i);
+Level* makeRandomLevel(int mode);   // Zufallsmodus: 0 Erwachsen, 1 Kind, 2 Klein
+void randomVoices(void (*out)(const char* key, const Txt& t));   // Sätze der Zufalls-Varianten (Schlüssel ohne Sprache)
 
 // ---------------- Layout ----------------
 constexpr float HEAD_Y = 40;       // Mitte der Kopfzeile („<  LVL.3  >>“)
@@ -95,7 +106,9 @@ constexpr float TASK_Y = 70;       // Oberkante des Aufgabentexts
 constexpr float BTN_Y = 356, BTN_S = 50;   // Knöpfe unten (Restart, Hints)
 constexpr float BTN_LX = 30, BTN_RX = W - 30 - BTN_S;
 // Zahlentastatur der Rätsel: Anzeige oben, darunter zwei Reihen „1 2 3 4 5 6“ und „7 8 9 0 < OK“
-constexpr float NP_KW = 48, NP_KH = 36, NP_KG = 6, NP_Y0 = 272, NP_Y1 = 312, NP_X0 = (W - 6 * NP_KW - 5 * NP_KG) / 2;
+// Große Tasten; in Leveln mit Tastatur rücken Neustart und Tipp als kleine Kreise in die unteren Ecken (PAD_BTN_*)
+constexpr float NP_KW = 52, NP_KH = 46, NP_KG = 6, NP_Y0 = 270, NP_Y1 = 322, NP_X0 = (W - 6 * NP_KW - 5 * NP_KG) / 2;
+constexpr float PAD_BTN_Y = 404, PAD_BTN_R = 21, PAD_BTN_LX = 52, PAD_BTN_RX = W - 52;
 constexpr float NP_DY = 228;   // Oberkante der Anzeige; Frage und Bild müssen darüber enden
 inline float npKeyX(int k) { return NP_X0 + (k % 6) * (NP_KW + NP_KG) + NP_KW / 2; }   // k: 0–8 = 1–9, 9 = 0, 10 = <, 11 = OK
 inline float npKeyY(int k) { return (k < 6 ? NP_Y0 : NP_Y1) + NP_KH / 2; }

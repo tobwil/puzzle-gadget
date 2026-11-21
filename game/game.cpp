@@ -10,6 +10,8 @@ namespace bc {
 namespace {
 // Knöpfe der Oberfläche
 enum Btn { B_BACK, B_SKIP, B_RESTART, B_HINT, B_PLAY = 10, B_GRID, B_LANG, B_SOUND, B_YES = 30, B_NO, B_TILE = 40 };
+// Titelbild: Spielen, Zufall (Würfel), Levelauswahl
+constexpr float TB_Y = 356, TB_H = 56, TP_X = 30, TP_W = 176, TD_X = 216, TG_X = 282, TB_S = 56;
 constexpr float VOLS[4] = {0, 0.25f, 0.55f, 1.0f};
 
 constexpr uint32_t DIM_MS = 90000, OFF_MS = 240000;
@@ -54,6 +56,7 @@ const Txt T_WHOSAY{"Who is playing? A little one, a child or an adult?", "Wer sp
 const Txt T_SET{"SETTINGS", "EINSTELLUNGEN"}, T_BRIGHT{"Brightness", "Helligkeit"}, T_VOL{"Volume", "Lautstärke"}, T_LANGROW{"Language", "Sprache"};
 const Txt T_WHOROW{"Who is playing?", "Wer spielt?"}, T_RESETALL{"Reset everything to 0", "Alles auf 0 zurücksetzen"}, T_POWER{"Power off", "Ausschalten"};
 const Txt T_SURE{"Sure? Tap again!", "Wirklich? Nochmal tippen!"}, T_DONE{"DONE", "FERTIG"};
+const Txt T_RANDOM{"RANDOM", "ZUFALL"}, T_STREAK{"STREAK %d", "SERIE %d"}, T_RECORDS{"Record %d", "Rekord %d"}, T_NEWREC{"NEW RECORD: %d!", "NEUER REKORD: %d!"};
 // Einstellungen: Zeilen
 constexpr float SR_Y = 64, SR_H = 44, SR_STEP = 50;
 const char* const PRAISE[2][5] = {{"NICE!", "BRAVO!", "WOW!", "SMART!", "GENIUS!"}, {"STARK!", "BRAVO!", "WOW!", "SUPER!", "GENIAL!"}};
@@ -81,7 +84,7 @@ Game::Game(dk::Synth& synth, dk::Store& store) : synth_(synth), store_(store) {
   motion.threshold = 0.12f;
 }
 
-Game::~Game() { for (auto* l : levels_) delete l; }
+Game::~Game() { for (auto* l : levels_) delete l; delete rl_; }
 
 const char* Game::key(const char* name) const {
   static const char* const PRE[3] = {"bc", "bk", "bs"};
@@ -98,6 +101,8 @@ void Game::loadProgress() {
   hintUsed_ = u0 | uint64_t(u1) << 32;
   hints_ = store_.get(key("hints"), 15);
   diff_ = store_.get(key("diff"), mode_ == ADULT ? 1 : 0) % 3;   // Kinder starten auf „Leicht“
+  bestStreak_ = store_.get(key("best"), 0);
+  endless_ = false;
   cur_ = store_.get(key("cur"), 0) % levelCount();
 }
 
@@ -122,10 +127,11 @@ void Game::showHint() {
   overlay_ = HINT;
   overlayT_ = 0;
   sfx(SFX_HINT);
-  if (mode_ == SMALL && hintUsed(cur_)) {
-    char k[8];
-    std::snprintf(k, sizeof k, "h%02d", cur_ + 1);
-    speak(k);
+  if (mode_ == SMALL && (endless_ || hintUsed(cur_))) {
+    char k[12];
+    if (endless_ && rCamp_ < 0) std::snprintf(k, sizeof k, "%s", rl_->hintKey() ? rl_->hintKey() : "");
+    else std::snprintf(k, sizeof k, "h%02d", (endless_ ? rCamp_ : cur_) + 1);
+    if (k[0]) speak(k);
   }
 }
 
@@ -172,14 +178,57 @@ void Game::speak(const char* what) {
   speaker->speak(k);
 }
 
+void Game::taskKey(char* k, int n) const {
+  const int i = endless_ ? rCamp_ : cur_;
+  if (endless_ && i < 0) { std::snprintf(k, n, "%s", rl_->voiceKey() ? rl_->voiceKey() : ""); return; }
+  // Kleine haben eigene Aufgaben, Kinder ab Level 13
+  std::snprintf(k, n, mode_ == SMALL ? "s%02d" : mode_ == KID && i >= 12 ? "k%02d" : "t%02d", i + 1);
+}
+
 void Game::enterLevel(int i) {
   startLevel(i);
   overlay_ = TASK;
   overlayT_ = 0;
-  char k[8];
-  // Kleine haben eigene Aufgaben, Kinder ab Level 13
-  std::snprintf(k, sizeof k, mode_ == SMALL ? "s%02d" : mode_ == KID && cur_ >= 12 ? "k%02d" : "t%02d", cur_ + 1);
+  char k[12];
+  taskKey(k, sizeof k);
   speak(k);
+}
+
+void Game::startRandom() {
+  delete rl_;
+  rl_ = nullptr;
+  // gemischt: feste Level der Altersstufe (neu angeordnet) und frisch gewürfelte Aufgaben
+  const int campShare = mode_ == SMALL ? 45 : mode_ == KID ? 35 : 25;
+  for (int tries = 0; tries < 4; tries++) {
+    if (rndi(100) < campShare) {
+      int i = rndi(levelCount());
+      if (mode_ == ADULT && i < 12 && rndi(2)) i = 12 + rndi(LEVELS - 12);   // Erwachsene: lieber Denkaufgaben
+      if (i == lastPick_) continue;
+      lastPick_ = i;
+      rCamp_ = i;
+      rl_ = mode_ == KID ? makeKidLevel(i) : mode_ == SMALL ? makeSmallLevel(i) : makeLevel(i);
+    } else {
+      rCamp_ = -1;
+      lastPick_ = -1;
+      rl_ = makeRandomLevel(mode_);
+    }
+    break;
+  }
+  if (!rl_) { rCamp_ = -1; rl_ = makeRandomLevel(mode_); }
+  endless_ = true;
+  rl_->reset();
+  rl_->solved = false;
+  levelT_ = 0;
+  solvedAt_ = -1;
+  screen_ = PLAY;
+  nRemarks_ = 0;
+  autoHinted_ = newBest_ = false;
+  bestT_ = 0;
+  overlay_ = TASK;
+  overlayT_ = 0;
+  char k[12];
+  taskKey(k, sizeof k);
+  if (k[0]) speak(k);
 }
 
 void Game::resetProgress() {
@@ -199,6 +248,7 @@ int Game::nextLevel() const {
 }
 
 void Game::startLevel(int i) {
+  endless_ = false;
   cur_ = (i % levelCount() + levelCount()) % levelCount();
   levels_[cur_]->reset();
   levels_[cur_]->solved = false;
@@ -216,7 +266,7 @@ void Game::startLevel(int i) {
 
 // ---------------- Host ----------------
 void Game::solve() {
-  Level* l = levels_[cur_];
+  Level* l = lvl();
   if (l->solved) return;
   l->solved = true;
   solvedAt_ = levelT_;
@@ -225,6 +275,12 @@ void Game::solve() {
   char k[8];
   std::snprintf(k, sizeof k, "p%d", pi);
   speak(k);
+  if (endless_) {   // Zufallsmodus: Serie zählt, Spielstand bleibt unberührt
+    streak_++;
+    newBest_ = streak_ > bestStreak_;
+    if (newBest_) { bestStreak_ = streak_; store_.set(key("best"), bestStreak_); }
+    return;
+  }
   if (!isDone(cur_)) { done_ |= uint64_t(1) << cur_; hints_++; save(); }
   if (diff_ == 2) {
     const int t = int(solvedAt_ * 10 + 0.5f);
@@ -290,9 +346,15 @@ void Game::sfx(int id) {
 }
 
 // ---------------- Eingabe ----------------
-static int btnAtPlay(float x, float y, int diff) {
+static int btnAtPlay(float x, float y, int diff, bool pad) {
   if (y < 72 && x < 76) return B_BACK;
   if (y < 72 && x > W - 76) return diff == 2 ? -1 : B_SKIP;
+  if (pad) {   // Tastatur: kleine Kreise unten, erst unterhalb der Tasten (y > NP_Y1 + NP_KH + 8)
+    if (y < NP_Y1 + NP_KH + 8) return -1;
+    if (dist(x, y, PAD_BTN_LX, PAD_BTN_Y) < PAD_BTN_R + 12) return B_RESTART;
+    if (dist(x, y, PAD_BTN_RX, PAD_BTN_Y) < PAD_BTN_R + 12) return B_HINT;
+    return -1;
+  }
   if (inRect(x, y, BTN_LX - 6, BTN_Y - 6, BTN_S + 12, BTN_S + 30)) return B_RESTART;
   if (inRect(x, y, BTN_RX - 6, BTN_Y - 6, BTN_S + 12, BTN_S + 30)) return B_HINT;
   return -1;
@@ -345,7 +407,7 @@ void Game::tick(const dk::Input& in) {
   // Wem gehört der Finger?
   if (pressed) {
     if (overlay_ != NONE || screen_ != PLAY) { uiTouch_ = true; pressedBtn_ = 0; }
-    else { pressedBtn_ = btnAtPlay(px, py, diff_); uiTouch_ = pressedBtn_ >= 0; }
+    else { pressedBtn_ = btnAtPlay(px, py, diff_, lvl()->hasPad()); uiTouch_ = pressedBtn_ >= 0; }
   }
   // Von oben nach unten wischen: Einstellungen (der Finger gehört ab da der Oberfläche)
   if (down_ && !swiped_ && !wake_ && overlay_ != SETTINGS && sy_ < 48 && y_ - sy_ > 70 && std::fabs(x_ - sx_) < y_ - sy_) {
@@ -370,7 +432,7 @@ void Game::tick(const dk::Input& in) {
 
   if (screen_ == WHO && !whoSpoken_ && speaker) { whoSpoken_ = true; speak("who3"); }
   if (screen_ == PLAY && overlay_ != TASK) {
-    Level* l = levels_[cur_];
+    Level* l = lvl();
     levelT_ += dt;
     f.t = levelT_;
     const bool mine = !uiTouch_ && !wake_ && overlay_ == NONE && !l->solved;
@@ -394,8 +456,7 @@ void Game::tick(const dk::Input& in) {
     // Leicht: nach 30 s ohne Lösung kommt der Tipp von selbst (gratis)
     if (diff_ == 0 && !l->solved && overlay_ == NONE && !autoHinted_ && levelT_ > 30) {
       autoHinted_ = true;
-      hintUsed_ |= uint64_t(1) << cur_;
-      save();
+      if (!endless_) { hintUsed_ |= uint64_t(1) << cur_; save(); }
       showHint();
     }
   }
@@ -463,6 +524,7 @@ void Game::tap(float x, float y) {
   if (overlay_ == SOLVED) {
     if (overlayT_ < 0.4f) return;
     sfx(SFX_CLICK);
+    if (endless_) { startRandom(); return; }
     const int n = nextLevel();
     const int nl = levelCount();
     if (done_ == (uint64_t(1) << nl) - 1 && cur_ == nl - 1) { screen_ = END; overlay_ = NONE; }
@@ -494,8 +556,9 @@ void Game::tap(float x, float y) {
       } else if (inRect(x, y, W / 2 - 100, 376, 200, 64)) { introPage_++; sfx(SFX_CLICK); }
       break;
     case TITLE:
-      if (inRect(x, y, 30, 350, 220, 64)) { sfx(SFX_POP); enterLevel(nextLevel()); }
-      else if (inRect(x, y, 262, 350, 80, 64)) { sfx(SFX_CLICK); screen_ = PICK; pickPage_ = nextLevel() / 12; }
+      if (inRect(x, y, TP_X - 4, TB_Y - 6, TP_W + 8, TB_H + 12)) { sfx(SFX_POP); enterLevel(nextLevel()); }
+      else if (inRect(x, y, TD_X - 4, TB_Y - 6, TB_S + 8, TB_H + 12)) { sfx(SFX_POP); streak_ = 0; startRandom(); }
+      else if (inRect(x, y, TG_X - 4, TB_Y - 6, TB_S + 8, TB_H + 12)) { sfx(SFX_CLICK); screen_ = PICK; pickPage_ = nextLevel() / 12; }
       else if (inRect(x, y, 280, 8, 80, 56)) { lang_ ^= 1; store_.set("bc_lang", lang_); sfx(SFX_CLICK); }
       else if (inRect(x, y, 214, 8, 62, 56)) { setVolume((vol_ + 1) & 3); store_.set("bc_vol", vol_); sfx(SFX_CLICK); }
       else if (inRect(x, y, 156, 8, 56, 56)) { screen_ = INTRO; introPage_ = 0; sfx(SFX_CLICK); }
@@ -518,12 +581,18 @@ void Game::tap(float x, float y) {
       screen_ = TITLE;
       break;
     case PLAY:
-      switch (btnAtPlay(x, y, diff_)) {
-        case B_BACK: screen_ = PICK; sfx(SFX_CLICK); break;
-        case B_SKIP: overlay_ = SKIP; overlayT_ = 0; sfx(SFX_CLICK); break;
-        case B_RESTART: startLevel(cur_); sfx(SFX_CLICK); break;
+      switch (btnAtPlay(x, y, diff_, lvl()->hasPad())) {
+        case B_BACK: screen_ = endless_ ? TITLE : PICK; endless_ = false; sfx(SFX_CLICK); break;
+        case B_SKIP:
+          if (endless_) { streak_ = 0; sfx(SFX_WHOOSH); startRandom(); break; }   // Zufall: neue Aufgabe, Serie beginnt neu
+          overlay_ = SKIP; overlayT_ = 0; sfx(SFX_CLICK); break;
+        case B_RESTART:
+          if (endless_) { rl_->reset(); rl_->solved = false; levelT_ = 0; solvedAt_ = -1; nRemarks_ = 0; }
+          else startLevel(cur_);
+          sfx(SFX_CLICK); break;
         case B_HINT:
           if (diff_ == 2) { sfx(SFX_NOPE); break; }   // Schwer: keine Tipps
+          if (endless_) { showHint(); break; }         // Zufall: Tipps gratis
           if (diff_ == 0 && !hintUsed(cur_)) { hintUsed_ |= uint64_t(1) << cur_; save(); }   // Leicht: gratis
           if (!hintUsed(cur_) && hints_ > 0) { hints_--; hintUsed_ |= uint64_t(1) << cur_; save(); }
           showHint();
@@ -541,8 +610,9 @@ void Game::drawHeader(Scene& s, int level) {
   iconBack(s, 36, HEAD_Y, INK);
   if (level >= 0) {
     if (diff_ != 2) iconSkip(s, W - 36, HEAD_Y, INK);
-    char b[16];
-    std::snprintf(b, sizeof b, "LVL.%d", level + 1);
+    char b[24];
+    if (endless_) std::snprintf(b, sizeof b, tr(T_STREAK, lang_), streak_);
+    else std::snprintf(b, sizeof b, "LVL.%d", level + 1);
     const float tw = Scene::textW(fonts::heavy, b);
     s.capsule(W / 2 - tw / 2 - 3, HEAD_Y + 5, W / 2 + tw / 2 + 3, HEAD_Y + 3, 8, CYAN);
     s.text(fonts::heavy, b, W / 2, HEAD_Y - 18, INK, 1, Align::Center);
@@ -551,6 +621,27 @@ void Game::drawHeader(Scene& s, int level) {
 
 void Game::drawButtons(Scene& s) {
   const bool rDown = down_ && uiTouch_ && pressedBtn_ == B_RESTART, hDown = down_ && uiTouch_ && pressedBtn_ == B_HINT;
+  if (lvl()->hasPad()) {   // Tastatur: nur kleine Kreise in den unteren Ecken, ohne Beschriftung
+    s.circle(PAD_BTN_LX, PAD_BTN_Y, PAD_BTN_R, rDown ? BTN_DOWN : BTN);
+    iconRestart(s, PAD_BTN_LX, PAD_BTN_Y, INK);
+    if (diff_ == 2) {
+      const int t = int(playTime());
+      char b[12];
+      std::snprintf(b, sizeof b, "%d:%02d", t / 60, t % 60);
+      s.text(fonts::label, b, PAD_BTN_RX, PAD_BTN_Y - 9, INK, 1, Align::Center);
+      return;
+    }
+    s.circle(PAD_BTN_RX, PAD_BTN_Y, PAD_BTN_R, hDown ? BTN_DOWN : BTN);
+    iconBulb(s, PAD_BTN_RX, PAD_BTN_Y - 1, 0.8f, INK);
+    if (!endless_) {
+      char b[8];
+      std::snprintf(b, sizeof b, "%d", hints_);
+      s.circle(PAD_BTN_RX + 17, PAD_BTN_Y - 16, 10, INK);
+      s.circle(PAD_BTN_RX + 17, PAD_BTN_Y - 16, 8.8f, CYAN);
+      s.text(fonts::label, b, PAD_BTN_RX + 17, PAD_BTN_Y - 25, INK, 1, Align::Center);
+    }
+    return;
+  }
   s.rrect(BTN_LX, BTN_Y, BTN_S, BTN_S, 15, rDown ? BTN_DOWN : BTN);
   iconRestart(s, BTN_LX + BTN_S / 2, BTN_Y + BTN_S / 2, INK);
   s.text(fonts::label, tr(T_RESTART, lang_), BTN_LX + BTN_S / 2, BTN_Y + BTN_S + 3, INK, 1, Align::Center);
@@ -613,14 +704,26 @@ void Game::drawTitle(Scene& s) {
   s.rrect(290, 20, 50, 30, 15, BTN);
   s.text(fonts::label, lang_ ? "DE" : "EN", 315, 26, INK, 1, Align::Center);
   // Spielen und Levelauswahl
-  const bool pDown = down_ && uiTouch_ && inRect(sx_, sy_, 30, 350, 220, 64);
-  s.rrect(36, 356, 212, 56, 28, pDown ? G6 : INK);
-  s.text(fonts::heavy, tr(T_PLAY, lang_), 142, 362, WHITE, 1, Align::Center);
+  const bool pDown = down_ && uiTouch_ && inRect(sx_, sy_, TP_X - 4, TB_Y - 6, TP_W + 8, TB_H + 12);
+  const bool dDown = down_ && uiTouch_ && inRect(sx_, sy_, TD_X - 4, TB_Y - 6, TB_S + 8, TB_H + 12);
+  s.rrect(TP_X, TB_Y, TP_W, TB_H, 28, pDown ? G6 : INK);
+  s.text(fonts::heavy, tr(T_PLAY, lang_), TP_X + TP_W / 2, TB_Y + 6, WHITE, 1, Align::Center);
   char b[24];
   std::snprintf(b, sizeof b, "LVL.%d", nextLevel() + 1);
-  s.text(fonts::label, b, 142, 391, CYAN, 1, Align::Center);
-  s.rrect(268, 356, 56, 56, 16, BTN);
-  iconGrid(s, 296, 384, INK);
+  s.text(fonts::label, b, TP_X + TP_W / 2, TB_Y + 35, CYAN, 1, Align::Center);
+  // Würfel: Zufallsmodus
+  s.rrect(TD_X, TB_Y, TB_S, TB_S, 16, dDown ? BTN_DOWN : YELLOW);
+  s.rrect(TD_X + 12, TB_Y + 12, 32, 32, 7, WHITE);
+  for (int i = 0; i < 5; i++) {
+    static const float D[5][2] = {{-8, -8}, {8, -8}, {0, 0}, {-8, 8}, {8, 8}};
+    s.circle(TD_X + 28 + D[i][0], TB_Y + 28 + D[i][1], 2.6f, INK);
+  }
+  s.rrect(TG_X, TB_Y, TB_S, TB_S, 16, BTN);
+  iconGrid(s, TG_X + TB_S / 2, TB_Y + TB_S / 2, INK);
+  if (bestStreak_ > 0) {
+    std::snprintf(b, sizeof b, tr(T_RECORDS, lang_), bestStreak_);
+    s.text(fonts::label, b, TD_X + TB_S / 2, TB_Y - 22, G4, 1, Align::Center);
+  }
 }
 
 void Game::drawLevels(Scene& s) {
@@ -669,12 +772,12 @@ void Game::drawOverlay(Scene& s) {
   s.rrect(0, 0, W, H, 0, WHITE, overlay_ == TASK || overlay_ == SETTINGS ? 1.f : 0.94f * a);
   if (overlay_ == SETTINGS) { drawSettings(s); return; }
   if (overlay_ == HINT) {
-    const bool has = hintUsed(cur_);
+    const bool has = endless_ || hintUsed(cur_);
     s.circle(W / 2, 130, 42, YELLOW, a);
     rays(s, W / 2, 130, 52, 64, 9, 2.6f, INK, a, 0.2f);
     iconBulb(s, W / 2, 132, 1.6f, INK);
     s.text(fonts::heavy, tr(T_HINT, lang_), W / 2, 190, INK, a, Align::Center);
-    textWrap(s, fonts::hand, has ? tr(levels_[cur_]->hint(), lang_) : tr(T_NOHINT, lang_), W / 2, 232, 300, INK, a);
+    textWrap(s, fonts::hand, has ? tr(lvl()->hint(), lang_) : tr(T_NOHINT, lang_), W / 2, 232, 300, INK, a);
     s.rrect(W / 2 - 60, OB_Y + 14, 120, 48, 24, INK, a);
     s.text(fonts::heavy, tr(T_OK, lang_), W / 2, OB_Y + 21, WHITE, a, Align::Center);
   } else if (overlay_ == SKIP) {
@@ -709,6 +812,12 @@ void Game::drawOverlay(Scene& s) {
         std::snprintf(b, sizeof b, "%s %d:%02d.%d", tr(T_BEST, lang_), bestT_ / 600, (bestT_ / 10) % 60, bestT_ % 10);
         s.text(fonts::label, b, W / 2, 296, G4, a, Align::Center);
       }
+    } else if (endless_) {
+      char b[48];
+      std::snprintf(b, sizeof b, tr(T_STREAK, lang_), streak_);
+      s.text(fonts::heavy, b, W / 2, 262, INK, a, Align::Center);
+      std::snprintf(b, sizeof b, tr(newBest_ ? T_NEWREC : T_RECORDS, lang_), bestStreak_);
+      s.text(fonts::label, b, W / 2, 296, newBest_ ? HOTPINK : G4, a, Align::Center);
     } else {
       const float pw = Scene::textW(fonts::heavy, tr(T_PLUS, lang_)), px = W / 2 - (pw + 34) / 2;
       iconBulb(s, px + 12, 290, 0.9f, INK);
@@ -726,19 +835,20 @@ void Game::drawOverlay(Scene& s) {
 void Game::drawTaskCard(Scene& s, float a) {
   const float u = ease(overlayT_ / 0.35f);
   char b[16];
-  std::snprintf(b, sizeof b, "LVL.%d", cur_ + 1);
+  if (endless_) std::snprintf(b, sizeof b, "%s", tr(T_RANDOM, lang_));
+  else std::snprintf(b, sizeof b, "LVL.%d", cur_ + 1);
   const float tw = Scene::textW(fonts::huge, b);
   s.circle(W / 2 + tw / 2 + 30, 56, 22 * u, YELLOW, a);
   s.capsule(W / 2 - tw / 2, 108, W / 2 - tw / 2 + (tw + 6) * u, 104, 10, CYAN, a);
   s.text(fonts::huge, b, W / 2, 62, INK, a, Align::Center);
-  const char* t = tr(levels_[cur_]->task(), lang_);
+  const char* t = tr(lvl()->task(), lang_);
   const bool longT = std::strlen(t) > 34;
   const float th = textWrap(s, longT ? fonts::body : fonts::heavy, t, W / 2, 140, 300, INK, a);
   float y = 140 + th + 22;
   if (diff_ == 0) {   // Leicht: was könnte helfen?
     s.text(fonts::label, tr(T_MAYBE, lang_), W / 2, y, G4, a, Align::Center);
     y += 26;
-    const int tools = levels_[cur_]->tools();
+    const int tools = lvl()->tools();
     const char* names[7];
     int n = 0;
     float total = 0;
@@ -878,7 +988,7 @@ void Game::draw(Scene& s) {
     case PICK: drawLevels(s); break;
     case END: drawEnd(s); break;
     case PLAY: {
-      Level* l = levels_[cur_];
+      Level* l = lvl();
       l->draw(s, frame_, lang_);
       if (!l->ownsTask()) textWrap(s, fonts::body, tr(l->task(), lang_), W / 2, TASK_Y, 300, INK);
       drawHeader(s, cur_);
@@ -923,6 +1033,14 @@ void Game::voiceLines(void (*out)(const char* key, const char* text)) {
       out(k, tr(l->hint(), lang));
       delete l;
     }
+    static int curLang;
+    static void (*sink)(const char*, const char*);
+    curLang = lang; sink = out;
+    randomVoices([](const char* key, const Txt& t) {
+      char kk[24];
+      std::snprintf(kk, sizeof kk, "%s_%s", curLang ? "de" : "en", key);
+      sink(kk, tr(t, curLang));
+    });
     std::snprintf(k, sizeof k, "%s_who3", L);
     out(k, tr(T_WHOSAY, lang));
     for (int i = 0; i < 5; i++) { std::snprintf(k, sizeof k, "%s_p%d", L, i); out(k, PRAISE[lang][i]); }
@@ -931,8 +1049,8 @@ void Game::voiceLines(void (*out)(const char* key, const char* text)) {
 }
 
 const char* Game::debug() {
-  std::snprintf(dbg_, sizeof dbg_, "screen %d modus %s level %d overlay %d solved 0x%09llx hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
-                int(screen_), mode_ == KID ? "kind" : mode_ == SMALL ? "klein" : "erwachsen", cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_,
+  std::snprintf(dbg_, sizeof dbg_, "screen %d modus %s%s level %d overlay %d solved 0x%09llx hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
+                int(screen_), mode_ == KID ? "kind" : mode_ == SMALL ? "klein" : "erwachsen", endless_ ? " zufall" : "", cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_,
                 motion.tiltX, motion.tiltY, motion.tiltZ);
   return dbg_;
 }

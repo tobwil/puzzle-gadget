@@ -26,7 +26,11 @@ class Game : Host {
   // Alle Sätze der Sprachausgabe (Schlüssel wie bei Speaker::speak, Text), für tools/mkvoice.py
   static void voiceLines(void (*out)(const char* key, const char* text));
   uint64_t doneMask() const { return done_; }
-  const char* levelAnswer() const { return levels_[cur_]->answer(); }
+  const char* levelAnswer() const { return lvl()->answer(); }
+  bool levelHasPad() const { return lvl()->hasPad(); }
+  void startRandom();   // Zufallsmodus: neue gewürfelte Aufgabe (mit Aufgabenkarte)
+  bool endless() const { return endless_; }
+  int streak() const { return streak_; }
   int hints() const { return hints_; }
   void setLang(int l) { lang_ = l & 1; }
   void skipIntro() { if (screen_ == INTRO) screen_ = TITLE; }
@@ -77,6 +81,8 @@ class Game : Host {
   void showHint();   // Tipp-Fenster (bei den Kleinen wird der Tipp vorgelesen)
   int skipCost() const { return diff_ == 0 ? 1 : 3; }
   float playTime() const { return solvedAt_ >= 0 ? solvedAt_ : levelT_; }
+  Level* lvl() const { return endless_ ? rl_ : levels_[cur_]; }
+  void taskKey(char* k, int n) const;   // Sprach-Clip der aktuellen Aufgabe (ohne Sprachkürzel)
   bool isDone(int i) const { return (done_ >> i) & 1; }
   bool hintUsed(int i) const { return (hintUsed_ >> i) & 1; }
   bool unlocked(int i) const { return i == 0 || isDone(i) || isDone(i - 1); }
@@ -88,6 +94,10 @@ class Game : Host {
   dk::Store& store_;
   Level* levels_[MAX_LEVELS] = {};
   int mode_ = ADULT;
+  // Zufallsmodus
+  bool endless_ = false;
+  Level* rl_ = nullptr;
+  int rCamp_ = -1, streak_ = 0, bestStreak_ = 0, lastPick_ = -1;
   bool whoSpoken_ = false;
   // Einstellungen
   int brightIdx_ = 2, settingsBack_ = 0, confirm_ = -1;
@@ -127,7 +137,7 @@ class Game : Host {
   uint32_t lastActive_ = 0;
   int bright_ = 170;
   bool off_ = false;
-  char dbg_[160];
+  char dbg_[200];
 };
 
 }  // namespace bc

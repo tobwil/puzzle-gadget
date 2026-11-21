@@ -10,9 +10,19 @@
 
 namespace bc {
 
+// Zufall für alle Level: auf dem Gerät aus esp_random() gesät, im Simulator fest (reproduzierbare Tour)
+static uint32_t gRnd = 0x12345678u;
+void seedRandom(uint32_t s) { gRnd = s ? s : 0x12345678u; }
+uint32_t rnd() {   // xorshift32
+  gRnd ^= gRnd << 13; gRnd ^= gRnd >> 17; gRnd ^= gRnd << 5;
+  return gRnd;
+}
+
 namespace {
 
 constexpr float CX = W / 2.f;
+// zufällige Reihenfolge 0..n-1
+void shuffle(int* a, int n) { for (int i = 0; i < n; i++) a[i] = i; for (int i = n - 1; i > 0; i--) std::swap(a[i], a[rndi(i + 1)]); }
 
 // Gegenstand, den man mit dem Finger verschieben kann
 struct Drag {
@@ -103,9 +113,9 @@ struct NumPad {
     for (int k = 0; k < 12; k++) {
       const bool down = k == lastKey && f.t - keyT < 0.12f;
       const float x = npKeyX(k) - NP_KW / 2, y = npKeyY(k) - NP_KH / 2;
-      s.rrect(x, y, NP_KW, NP_KH, 10, k == 11 ? INK : down ? BTN_DOWN : BTN, a);
-      if (k == 11) s.text(fonts::label, L[k], npKeyX(k), y + 9, WHITE, a, Align::Center);
-      else s.text(fonts::num, L[k], npKeyX(k), y + 5, INK, a, Align::Center);
+      s.rrect(x, y, NP_KW, NP_KH, 12, k == 11 ? INK : down ? BTN_DOWN : BTN, a);
+      if (k == 11) s.text(fonts::label, L[k], npKeyX(k), y + 14, WHITE, a, Align::Center);
+      else s.text(fonts::num, L[k], npKeyX(k), y + 10, INK, a, Align::Center);
     }
   }
 };
@@ -229,6 +239,7 @@ class CountCandy : public Level {
   Txt task() const override { return {"How many candies are there?", "Wie viele Bonbons gibt es?"}; }
   Txt hint() const override { return {"Not everything is in plain sight. Move the cup!", "Nicht alles liegt offen da. Schieb den Becher weg!"}; }
   const char* answer() const override { return "6"; }
+  bool hasPad() const override { return true; }
   void reset() override { cup.set(276, 186); win.reset(); pad.clear(); lock.reset(); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.7f);
@@ -736,6 +747,7 @@ class Quiz : public Level {
   Txt hint() const override { return q.hint; }
   int tools() const override { return TOOL_THINK; }
   const char* answer() const override { return q.answer; }
+  bool hasPad() const override { return q.answer != nullptr; }
   void reset() override { win.reset(); pad.clear(); lock.reset(); phase0 = 0; picked = wrong = -1; wrongT = -10; }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.9f);
@@ -1081,7 +1093,8 @@ class Memory7 : public Level {
   }
   int tools() const override { return TOOL_THINK; }
   const char* answer() const override { return num; }
-  void reset() override { win.reset(); pad.clear(); lock.reset(); phase0 = 0.4f; fresh(); }
+  bool hasPad() const override { return true; }
+  void reset() override { win.reset(); pad.clear(); lock.reset(); phase0 = 0.4f; seed = rnd(); fresh(); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.9f);
     if (win.on() || f.t - phase0 < SHOW) return;
@@ -1135,7 +1148,7 @@ class StroopSprint : public Level {
   Txt hint() const override { return {"Ignore what the word says. Only the color of the letters counts.", "Ignorier, was da steht. Nur die Farbe der Buchstaben zählt."}; }
   int tools() const override { return TOOL_FINGER | TOOL_THINK; }
   const char* answer() const override { return ans; }
-  void reset() override { win.reset(); streak = 0; startT = -1; wrongT = okT = -10; wrongBtn = -1; next(); }
+  void reset() override { win.reset(); streak = 0; startT = -1; wrongT = okT = -10; wrongBtn = -1; seed = rnd(); next(); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.9f);
     if (win.on()) return;
@@ -1205,7 +1218,7 @@ class Simon : public Level {
   int tools() const override { return TOOL_THINK; }
   const char* answer() const override { return ans; }
   void reset() override {
-    win.reset(); lock.reset(); pos = 0; phase0 = 0.8f;
+    win.reset(); lock.reset(); pos = 0; phase0 = 0.8f; seed = rnd();
     for (int i = 0; i < N; i++) { seq[i] = lcg(seed) % 4; ans[i] = char('0' + seq[i]); }
     ans[N] = 0;
     for (float& t : litT) t = -10;
@@ -1346,8 +1359,9 @@ class TapColor : public Level {
   float wrongT = -10;
   int wrongI = -1;
   static constexpr float P[4][2] = {{110, 160}, {258, 160}, {110, 272}, {258, 272}};
-  static constexpr int ORDER[2][4] = {{1, 2, 0, 3}, {3, 0, 2, 1}};   // Farbe je Platz
-  const int* order() const { return ORDER[want == 0 ? 1 : 0]; }
+  int perm[4] = {1, 2, 0, 3};   // Farbe je Platz, bei jedem Spiel neu gemischt
+  char ans[2] = {};
+  const int* order() const { return perm; }
  public:
   explicit TapColor(int color) : want(color) {}
   Txt task() const override {
@@ -1360,7 +1374,14 @@ class TapColor : public Level {
                              {"Yellow like the sun.", "Gelb wie die Sonne."}, {"Green like grass.", "Grün wie Gras."}};
     return T[want];
   }
-  void reset() override { win.reset(); hit = wrongI = -1; wrongT = -10; }
+  const char* answer() const override { return ans; }
+  const char* voiceKey() const override { static const char* K[4] = {"vcol0", "vcol1", "vcol2", "vcol3"}; return K[want]; }
+  const char* hintKey() const override { static const char* K[4] = {"vhcol0", "vhcol1", "vhcol2", "vhcol3"}; return K[want]; }
+  void reset() override {
+    win.reset(); hit = wrongI = -1; wrongT = -10;
+    shuffle(perm, 4);
+    for (int i = 0; i < 4; i++) if (perm[i] == want) ans[0] = char('0' + i);
+  }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 1.0f);
     if (win.on() || !f.tap) return;
@@ -1389,7 +1410,11 @@ class CountTap : public Level {
   static constexpr float BW = 58, BG = 6, BY = 266, BH = 62;
   static float bx(int i) { return CX - (5 * BW + 4 * BG) / 2 + i * (BW + BG); }
  public:
-  CountTap(int count, int what) : n(count), kind(what) {}
+  char ans[2] = {};
+  CountTap(int count, int what) : n(count), kind(what) { ans[0] = char('0' + count); }
+  const char* answer() const override { return ans; }
+  const char* voiceKey() const override { static const char* K[3] = {"vcnt0", "vcnt1", "vcnt2"}; return K[kind]; }
+  const char* hintKey() const override { return "vhcnt"; }
   Txt task() const override {
     static const Txt T[3] = {{"How many candies are there?", "Wie viele Bonbons sind das?"}, {"How many mice are there?", "Wie viele Mäuse sind das?"},
                              {"How many stars are there?", "Wie viele Sterne sind das?"}};
@@ -1440,15 +1465,20 @@ class BigSmall : public Level {
   int animal;   // 0 Elefant, 1 Maus
   float wrongT = -10;
   static constexpr float LX = 110, RX = 262, GY = 270;
-  bool bigLeft() const { return animal == 0; }
+  bool left_ = true;
+  char ans[2] = {};
+  bool bigLeft() const { return left_; }
  public:
   BigSmall(bool big, int a) : wantBig(big), animal(a) {}
+  const char* answer() const override { return ans; }   // 0 links, 1 rechts
+  const char* voiceKey() const override { static const char* K[4] = {"vbig00", "vbig01", "vbig10", "vbig11"}; return K[animal * 2 + wantBig]; }
+  const char* hintKey() const override { return wantBig ? "vhbig1" : "vhbig0"; }
   Txt task() const override {
     if (animal == 0) return wantBig ? Txt{"Tap the big elephant", "Tippe auf den großen Elefanten"} : Txt{"Tap the small elephant", "Tippe auf den kleinen Elefanten"};
     return wantBig ? Txt{"Tap the big mouse", "Tippe auf die große Maus"} : Txt{"Tap the little mouse", "Tippe auf die kleine Maus"};
   }
   Txt hint() const override { return wantBig ? Txt{"Big means: takes up lots of room.", "Groß heißt: braucht viel Platz."} : Txt{"Little means: tiny, like a baby.", "Klein heißt: winzig, wie ein Baby."}; }
-  void reset() override { win.reset(); wrongT = -10; }
+  void reset() override { win.reset(); wrongT = -10; left_ = rndi(2); ans[0] = char('0' + ((left_ == wantBig) ? 0 : 1)); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 1.0f);
     if (win.on() || !f.tap || f.y < 120 || f.y > 340) return;
@@ -1462,7 +1492,7 @@ class BigSmall : public Level {
     const float bounce = win.on() ? std::fabs(std::sin(win.since(f) * 9)) * 10 : 0;
     const float bx = bigLeft() ? LX : RX, sx = bigLeft() ? RX : LX;
     const float bb = wantBig ? bounce : 0, sb = wantBig ? 0 : bounce;
-    if (animal == 0) { drawElephant(s, bx - 10, GY - bb, 1.0f); drawElephant(s, sx, GY + 30 - sb, 0.45f, true); }
+    if (animal == 0) { drawElephant(s, bx - 10, GY - bb, 0.95f, !bigLeft()); drawElephant(s, sx, GY + 30 - sb, 0.45f, bigLeft()); }
     else { drawMouse(s, bx, GY - bb, 1.15f); drawMouse(s, sx + 10, GY + 16 - sb, 0.55f, true); }
     (void)wrongT;
   }
@@ -1474,7 +1504,9 @@ class Shapes : public Level {
   int want, hit = -1, wrongI = -1;
   float wrongT = -10;
   static constexpr float XS[3] = {72, 184, 296}, Y = 220;
-  static int shapeAt(int want, int i) { return (i + 2 * want + 1) % 3; }   // jede Aufgabe mischt anders
+  int perm[3] = {1, 2, 0};
+  char ans[2] = {};
+  int shapeAt(int, int i) const { return perm[i]; }   // bei jedem Spiel neu gemischt
   static void shape(Scene& s, int k, float x, float y, float r, float a = 1) {
     if (k == 0) s.circle(x, y, r, CYAN, a);
     else if (k == 1) tri(s, x - r * 1.1f, y + r * 0.8f, x + r * 1.1f, y + r * 0.8f, x, y - r * 1.05f, HOTPINK, a);
@@ -1482,6 +1514,9 @@ class Shapes : public Level {
   }
  public:
   explicit Shapes(int s) : want(s) {}
+  const char* answer() const override { return ans; }
+  const char* voiceKey() const override { static const char* K[3] = {"vshp0", "vshp1", "vshp2"}; return K[want]; }
+  const char* hintKey() const override { static const char* K[3] = {"vhshp0", "vhshp1", "vhshp2"}; return K[want]; }
   Txt task() const override {
     static const Txt T[3] = {{"Where is the circle?", "Wo ist der Kreis?"}, {"Where is the triangle?", "Wo ist das Dreieck?"}, {"Where is the square?", "Wo ist das Quadrat?"}};
     return T[want];
@@ -1491,7 +1526,11 @@ class Shapes : public Level {
                              {"A square has 4 corners, all sides the same.", "Ein Quadrat hat 4 Ecken und gleich lange Seiten."}};
     return T[want];
   }
-  void reset() override { win.reset(); hit = wrongI = -1; wrongT = -10; }
+  void reset() override {
+    win.reset(); hit = wrongI = -1; wrongT = -10;
+    shuffle(perm, 3);
+    for (int i = 0; i < 3; i++) if (perm[i] == want) ans[0] = char('0' + i);
+  }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 1.0f);
     if (win.on() || !f.tap) return;
@@ -1535,10 +1574,13 @@ class FindAnimal : public Level {
   int want, hit = -1, wrongI = -1;
   float wrongT = -10;
   static constexpr float XS[3] = {72, 184, 296}, Y = 226;
-  int at(int slot) const { const int t = want % 3; return slot == t ? want : (want + (slot < t ? slot : slot - 1) * 2 + 1) % 7; }
+  int slots[3] = {};
   char ans[2] = {};
+  int at(int slot) const { return slots[slot]; }
  public:
-  explicit FindAnimal(int a) : want(a) { ans[0] = char('0' + want % 3); }
+  explicit FindAnimal(int a) : want(a) {}
+  const char* voiceKey() const override { static const char* K[7] = {"vani0", "vani1", "vani2", "vani3", "vani4", "vani5", "vani6"}; return K[want]; }
+  const char* hintKey() const override { static const char* K[7] = {"vhani0", "vhani1", "vhani2", "vhani3", "vhani4", "vhani5", "vhani6"}; return K[want]; }
   Txt task() const override {
     static const Txt T[7] = {{"Where is the owl?", "Wo ist die Eule?"}, {"Where is the rabbit?", "Wo ist der Hase?"}, {"Where is the elephant?", "Wo ist der Elefant?"},
                              {"Where is the bat?", "Wo ist die Fledermaus?"}, {"Where is the dog?", "Wo ist der Hund?"}, {"Where is the mouse?", "Wo ist die Maus?"},
@@ -1553,7 +1595,18 @@ class FindAnimal : public Level {
     return T[want];
   }
   const char* answer() const override { return ans; }
-  void reset() override { win.reset(); hit = wrongI = -1; wrongT = -10; }
+  void reset() override {
+    win.reset(); hit = wrongI = -1; wrongT = -10;
+    int others[7], k = 0;
+    shuffle(others, 7);
+    const int t = rndi(3);
+    for (int i = 0; i < 3; i++) {
+      if (i == t) { slots[i] = want; continue; }
+      while (others[k] == want) k++;
+      slots[i] = others[k++];
+    }
+    ans[0] = char('0' + t);
+  }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 1.0f);
     if (win.on() || !f.tap) return;
@@ -1582,19 +1635,29 @@ class Balloons : public Level {
   float popT[6] = {}, wrongT = -10;
   int next = 0;
   char ans[8] = {};
-  static constexpr float P[6][2] = {{72, 176}, {154, 146}, {234, 180}, {306, 150}, {114, 270}, {262, 272}};
-  static constexpr int ORDER[6] = {3, 0, 5, 1, 4, 2};   // Zahl k+1 steht auf Ballon ORDER[k]
-  bool red(int i) const { return i == 0 || i == 2 || i == 5; }
+  int ORDER[6] = {3, 0, 5, 1, 4, 2};   // Zahl k+1 steht auf Ballon ORDER[k] (jedes Spiel neu)
+  bool isRed[6] = {true, false, true, false, false, true};
+  static constexpr float P[6][2] = {{72, 186}, {154, 158}, {234, 190}, {306, 162}, {114, 274}, {262, 276}};
+  bool red(int i) const { return isRed[i]; }
   Col color(int i) const {
-    static const Col C[6] = {RED, CYAN, RED, YELLOW, MINT, RED};
+    static const Col C[6] = {CYAN, YELLOW, MINT, PURPLE, BLUE, GREEN};
     static const Col C2[6] = {PINK, CYAN, YELLOW, PURPLE, MINT, ORANGE};
-    return mode == 1 ? C[i] : C2[i];
+    return mode == 1 ? (isRed[i] ? RED : C[i]) : C2[i];
   }
-  int numberOf(int i) const { for (int k = 0; k < 6; k++) if (ORDER[k] == i) return k + 1; return 0; }
+  int numberOf(int i) const { for (int k = 0; k < n; k++) if (ORDER[k] == i) return k + 1; return 0; }
   bool target(int i) const { return mode != 1 || red(i); }
   bool done() const { for (int i = 0; i < n; i++) if (target(i) && !popped[i]) return false; return true; }
  public:
-  Balloons(int count, int m) : n(count), mode(m) {
+  Balloons(int count, int m) : n(count), mode(m) {}
+  const char* voiceKey() const override { static const char* K[3] = {"vbal0", "vbal1", "vbal2"}; return K[mode]; }
+  const char* hintKey() const override { static const char* K[3] = {"vhbal0", "vhbal1", "vhbal2"}; return K[mode]; }
+  void shuffleUp() {
+    shuffle(ORDER, n);
+    int p[6];
+    shuffle(p, n);
+    const int reds = n <= 4 ? 2 : 3;
+    for (int i = 0; i < 6; i++) isRed[i] = false;
+    for (int i = 0; i < reds; i++) isRed[p[i]] = true;
     int k = 0;
     if (mode == 2) for (int j = 0; j < n; j++) ans[k++] = char('0' + ORDER[j]);
     else for (int i = 0; i < n; i++) if (target(i)) ans[k++] = char('0' + i);
@@ -1611,7 +1674,7 @@ class Balloons : public Level {
     return {"Tap each balloon once.", "Tipp jeden Ballon einmal an."};
   }
   const char* answer() const override { return ans; }
-  void reset() override { win.reset(); for (bool& p : popped) p = false; next = 0; wrongT = -10; }
+  void reset() override { win.reset(); for (bool& p : popped) p = false; next = 0; wrongT = -10; shuffleUp(); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 0.8f);
     if (win.on() || !f.pressed) return;
@@ -1665,6 +1728,8 @@ class DragHome : public Level {
   static constexpr float HX = 270, HY = 250;
  public:
   explicit DragHome(int variant) : v(variant) {}
+  const char* voiceKey() const override { return v ? "vdrag1" : "vdrag0"; }
+  const char* hintKey() const override { return "vhdrag"; }
   Txt task() const override { return v == 0 ? Txt{"Bring the mouse to the cheese", "Bring die Maus zum Käse"} : Txt{"Bring the dog into its kennel", "Bring den Hund in seine Hütte"}; }
   Txt hint() const override { return {"Put your finger on it and pull.", "Leg den Finger drauf und zieh."}; }
   void reset() override { thing.set(84, 300); win.reset(); }
@@ -1709,6 +1774,8 @@ class Tickle : public Level {
   static constexpr float TX = CX, TY = 240;
  public:
   explicit Tickle(int variant) : v(variant) {}
+  const char* voiceKey() const override { return v ? "vtick1" : "vtick0"; }
+  const char* hintKey() const override { return "vhtick"; }
   Txt task() const override { return v == 0 ? Txt{"Tickle the dinosaur!", "Kitzel den Dino!"} : Txt{"Pet the dog!", "Streichel den Hund!"}; }
   Txt hint() const override { return {"Rub your finger back and forth on it.", "Fahr mit dem Finger hin und her über das Tier."}; }
   void reset() override { win.reset(); rubbed = lastSay = wig = 0; }
@@ -1754,13 +1821,15 @@ class MoreLess : public Level {
   int right() const { return (more ? a > b : a < b) ? 0 : 1; }
  public:
   MoreLess(int left, int rgt, bool m, int k) : a(left), b(rgt), kind(k), more(m) { ans[0] = char('0' + right()); }
+  const char* voiceKey() const override { static const char* K[4] = {"vml00", "vml01", "vml10", "vml11"}; return K[kind * 2 + more]; }
+  const char* hintKey() const override { return more ? "vhml1" : "vhml0"; }
   Txt task() const override {
     if (kind == 0) return more ? Txt{"Where are there more candies?", "Wo sind mehr Bonbons?"} : Txt{"Where are there fewer candies?", "Wo sind weniger Bonbons?"};
     return more ? Txt{"Where are there more mice?", "Wo sind mehr Mäuse?"} : Txt{"Where are there fewer mice?", "Wo sind weniger Mäuse?"};
   }
   Txt hint() const override { return more ? Txt{"Count both sides. More is the bigger number.", "Zähl beide Seiten. Mehr ist die größere Zahl."} : Txt{"Count both sides. Fewer is the smaller number.", "Zähl beide Seiten. Weniger ist die kleinere Zahl."}; }
   const char* answer() const override { return ans; }
-  void reset() override { win.reset(); wrongI = -1; wrongT = -10; }
+  void reset() override { win.reset(); wrongI = -1; wrongT = -10; if (rndi(2)) std::swap(a, b); ans[0] = char('0' + right()); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 1.0f);
     if (win.on() || !f.tap || f.y < BY || f.y > BY + BH) return;
@@ -1795,7 +1864,8 @@ class Cups : public Level {
   bool wrong = false;
   uint32_t seed = 0xC0B5;
   char ans[2] = {};
-  static constexpr float CY = 256, SHOW = 1.6f, D = 0.7f;
+  static constexpr float CY = 256, SHOW = 1.6f;
+  const float D;   // Dauer eines Tauschs: je mehr Tausche, desto schneller
   static float slotX(int p) { return 84 + p * 100; }
   float playEnd() const { return t0 + SHOW + swaps * D; }
   void round(float start) {
@@ -1830,11 +1900,13 @@ class Cups : public Level {
     x = slotX(p);
   }
  public:
-  explicit Cups(int n) : swaps(n) {}
+  explicit Cups(int n) : swaps(n), D(n > 5 ? 0.42f : n > 3 ? 0.6f : 0.7f) {}
+  const char* voiceKey() const override { return swaps ? "vcup1" : "vcup0"; }
+  const char* hintKey() const override { return swaps ? "vhcup1" : "vhcup0"; }
   Txt task() const override { return swaps ? Txt{"Watch closely: where is the candy?", "Pass gut auf: Wo ist das Bonbon?"} : Txt{"Remember where the candy is!", "Merk dir, wo das Bonbon ist!"}; }
   Txt hint() const override { return swaps ? Txt{"Follow just one cup with your eyes.", "Folge nur einem Becher mit den Augen."} : Txt{"Look where the candy goes before the cups come down.", "Schau, wo das Bonbon liegt, bevor die Becher runterkommen."}; }
   const char* answer() const override { return ans; }
-  void reset() override { win.reset(); seed = 0xC0B5 + swaps; round(0.4f); }
+  void reset() override { win.reset(); seed = rnd(); round(0.4f); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 1.0f);
     if (win.on()) return;
@@ -1874,14 +1946,17 @@ class OddOne : public Level {
   int v, hit = -1, wrongI = -1;
   float wrongT = -10;
   char ans[2] = {};
+  int oddAt = 2;
   static constexpr float P[4][2] = {{110, 170}, {258, 170}, {110, 282}, {258, 282}};
-  int odd() const { return v == 0 ? 2 : 1; }
+  int odd() const { return oddAt; }
  public:
-  explicit OddOne(int variant) : v(variant) { ans[0] = char('0' + odd()); }
+  explicit OddOne(int variant) : v(variant) {}
+  const char* voiceKey() const override { return "vodd"; }
+  const char* hintKey() const override { return "vhodd"; }
   Txt task() const override { return {"Which one does not belong?", "Was passt nicht dazu?"}; }
   Txt hint() const override { return {"Three are the same kind, one is different.", "Drei sind gleich, eins ist anders."}; }
   const char* answer() const override { return ans; }
-  void reset() override { win.reset(); hit = wrongI = -1; wrongT = -10; }
+  void reset() override { win.reset(); hit = wrongI = -1; wrongT = -10; oddAt = rndi(4); ans[0] = char('0' + oddAt); }
   void tick(const Frame& f, Host& h) override {
     win.tick(f, h, 1.0f);
     if (win.on() || !f.tap) return;
@@ -1897,13 +1972,268 @@ class OddOne : public Level {
       const float sh = i == wrongI && f.t - wrongT < 0.4f ? std::sin((f.t - wrongT) * 50) * 5 : 0;
       const float x = P[i][0] + sh, y = P[i][1] - (i == hit ? std::fabs(std::sin(win.since(f) * 9)) * 12 : 0);
       if (v == 0) { if (i == odd()) drawMouse(s, x + 10, y + 8, 0.75f); else drawCandy(s, x, y, 1.5f, CC[i]); }
-      else { if (i == odd()) drawCandy(s, x, y, 1.5f, CC[i]); else drawAnimal(s, i == 0 ? 0 : i == 2 ? 1 : 4, x, y, 0.85f, f.t); }
+      else { if (i == odd()) drawCandy(s, x, y, 1.5f, CC[i]); else drawAnimal(s, i % 3 == 0 ? 0 : i % 3 == 1 ? 1 : 4, x, y, 0.85f, f.t); }
     }
     if (win.on()) rays(s, P[hit][0], P[hit][1], 58, 70, 10, 2.5f, YELLOW, 1, f.t);
   }
 };
 
+// ======================= Zufalls-Generatoren (Zufallsmodus) =======================
+// Gemeinsame Grundlage: Zahlenantwort über die Tastatur, Text in eigenen Puffern, bei jedem reset() neu gewürfelt
+class GenPad : public Level {
+ protected:
+  Win win;
+  NumPad pad;
+  Lock lock;
+  char qen[128] = {}, qde[128] = {}, hen[96] = {}, hde[96] = {}, ans[10] = {};
+  bool adult;
+  virtual void roll() = 0;   // neue Aufgabe würfeln: qen/qde, hen/hde, ans
+  void setQ(const char* en, const char* de) { std::snprintf(qen, sizeof qen, "%s", en); std::snprintf(qde, sizeof qde, "%s", de); }
+  void setH(const char* en, const char* de) { std::snprintf(hen, sizeof hen, "%s", en); std::snprintf(hde, sizeof hde, "%s", de); }
+  void setA(int v) { std::snprintf(ans, sizeof ans, "%d", v); }
+ public:
+  explicit GenPad(bool a) : adult(a) {}
+  Txt task() const override { return {qen, qde}; }
+  Txt hint() const override { return {hen, hde}; }
+  int tools() const override { return TOOL_THINK; }
+  const char* answer() const override { return ans; }
+  bool hasPad() const override { return true; }
+  void reset() override { win.reset(); pad.clear(); lock.reset(); roll(); }
+  void tick(const Frame& f, Host& h) override {
+    win.tick(f, h, 0.9f);
+    if (win.on()) return;
+    if (pad.tick(f, h, lock.on(f))) {
+      if (pad.is(ans)) { win.start(f); h.sfx(SFX_WIN); }
+      else { lock.fail(f, !adult); pad.wrong(f); h.nope(CX, NP_DY - 30); }
+    }
+  }
+  void draw(Scene& s, const Frame& f, int) override {
+    pad.draw(s, f, lock, win.on());
+    if (win.on()) for (int i = 0; i < 4; i++) sparkle(s, 50 + i * 90, 210 + (i % 2) * 18, 9, i % 2 ? CYAN : INK, 1, f.t * 2 + i);
+  }
+};
+
+// Rechnen: Kinder bis 20 und kleines Einmaleins (auch als kleine Geschichten), Erwachsene Kopfrechnen mit Kniff
+class GenMath : public GenPad {
+  void roll() override {
+    char e[128], d[128];
+    if (!adult) {
+      switch (rndi(8)) {
+        case 0: { const int a = 2 + rndi(11), b = 2 + rndi(9); std::snprintf(e, sizeof e, "What is %d + %d?", a, b); std::snprintf(d, sizeof d, "Wie viel ist %d + %d?", a, b); setA(a + b); break; }
+        case 1: { const int a = 8 + rndi(13), b = 1 + rndi(a - 1); std::snprintf(e, sizeof e, "What is %d – %d?", a, b); std::snprintf(d, sizeof d, "Wie viel ist %d – %d?", a, b); setA(a - b); break; }
+        case 2: { const int a = 2 + rndi(4), b = 2 + rndi(9); std::snprintf(e, sizeof e, "What is %d × %d?", a, b); std::snprintf(d, sizeof d, "Wie viel ist %d × %d?", a, b); setA(a * b); break; }
+        case 3: { const int a = 3 + rndi(8), b = 2 + rndi(6);
+          std::snprintf(e, sizeof e, "%d children are playing in the garden. %d more come. How many are there now?", a, b);
+          std::snprintf(d, sizeof d, "%d Kinder spielen im Garten. %d kommen dazu. Wie viele sind es jetzt?", a, b); setA(a + b); break; }
+        case 4: { const int a = 6 + rndi(10), b = 1 + rndi(a - 2);
+          std::snprintf(e, sizeof e, "You have %d sweets and eat %d of them. How many are left?", a, b);
+          std::snprintf(d, sizeof d, "Du hast %d Bonbons und isst %d davon. Wie viele hast du noch?", a, b); setA(a - b); break; }
+        case 5: { const int a = 2 + rndi(5);
+          std::snprintf(e, sizeof e, "A dog has 4 legs. How many legs do %d dogs have?", a);
+          std::snprintf(d, sizeof d, "Ein Hund hat 4 Beine. Wie viele Beine haben %d Hunde?", a); setA(4 * a); break; }
+        case 6: { const int a = 2 * (2 + rndi(9));
+          std::snprintf(e, sizeof e, "What is half of %d?", a); std::snprintf(d, sizeof d, "Was ist die Hälfte von %d?", a); setA(a / 2); break; }
+        default: { const int a = 5 + rndi(10), b = 2 + rndi(4), c = 1 + rndi(b);
+          std::snprintf(e, sizeof e, "There are %d birds on a tree. %d fly away, then %d come back. How many are there?", a, b, c);
+          std::snprintf(d, sizeof d, "Auf einem Baum sitzen %d Vögel. %d fliegen weg, dann kommen %d zurück. Wie viele sind es?", a, b, c); setA(a - b + c); break; }
+      }
+      setQ(e, d);
+      setH("Go step by step. You can use your fingers.", "Rechne Schritt für Schritt. Du darfst die Finger nehmen.");
+      return;
+    }
+    switch (rndi(8)) {
+      case 0: { const int a = 12 + rndi(18), b = 3 + rndi(7); std::snprintf(e, sizeof e, "What is %d × %d?", a, b); std::snprintf(d, sizeof d, "Wie viel ist %d × %d?", a, b); setA(a * b);
+        setH("Split it: tens times, then units times, then add.", "Zerlegen: Zehner mal, Einer mal, dann addieren."); break; }
+      case 1: { const int b = 3 + rndi(10), q = 6 + rndi(20); std::snprintf(e, sizeof e, "What is %d : %d?", b * q, b); std::snprintf(d, sizeof d, "Wie viel ist %d : %d?", b * q, b); setA(q);
+        setH("Which number times the divisor gives this?", "Welche Zahl mal den Teiler ergibt das?"); break; }
+      case 2: { static const int P[4] = {10, 20, 25, 50}; const int p = P[rndi(4)], v = 20 * (2 + rndi(20));
+        std::snprintf(e, sizeof e, "What is %d %% of %d?", p, v); std::snprintf(d, sizeof d, "Wie viel sind %d %% von %d?", p, v); setA(v * p / 100);
+        setH("10 % is a tenth, 25 % a quarter, 50 % half.", "10 % ist ein Zehntel, 25 % ein Viertel, 50 % die Hälfte."); break; }
+      case 3: { const int n = 11 + rndi(15); std::snprintf(e, sizeof e, "What is the square root of %d?", n * n); std::snprintf(d, sizeof d, "Was ist die Wurzel aus %d?", n * n); setA(n);
+        setH("Look at the last digit and estimate the tens.", "Schau auf die letzte Ziffer und schätz die Zehner."); break; }
+      case 4: { const int x = 5 * (4 + rndi(36)), p = rndi(2) ? 20 : 40;
+        std::snprintf(e, sizeof e, "Something costs €%d and is reduced by %d %%. How many euros does it cost now?", x, p);
+        std::snprintf(d, sizeof d, "Etwas kostet %d € und wird um %d %% reduziert. Wie viele Euro kostet es jetzt?", x, p); setA(x * (100 - p) / 100);
+        setH("Work out the discount first, then subtract it.", "Erst den Rabatt ausrechnen, dann abziehen."); break; }
+      case 5: { const int n = 20 + 10 * rndi(8), dd = 1 + rndi(4);
+        std::snprintf(e, sizeof e, "What is %d² – %d²?", n + dd, n - dd); std::snprintf(d, sizeof d, "Wie viel ist %d² – %d²?", n + dd, n - dd); setA(4 * n * dd);
+        setH("a² – b² = (a + b) × (a – b)", "a² – b² = (a + b) × (a – b)"); break; }
+      case 6: { const int h = 2 + rndi(5), m = 15 * (1 + rndi(3));
+        std::snprintf(e, sizeof e, "How many minutes are %d hours and %d minutes?", h, m); std::snprintf(d, sizeof d, "Wie viele Minuten sind %d Stunden und %d Minuten?", h, m); setA(60 * h + m);
+        setH("One hour has 60 minutes.", "Eine Stunde hat 60 Minuten."); break; }
+      default: { const int a = 101 + rndi(800), b = 99 + rndi(100);
+        std::snprintf(e, sizeof e, "What is %d + %d?", a, b); std::snprintf(d, sizeof d, "Wie viel ist %d + %d?", a, b); setA(a + b);
+        setH("Round the second number to 100 and correct afterwards.", "Runde die zweite Zahl auf 100 und korrigier danach."); break; }
+    }
+    setQ(e, d);
+  }
+ public:
+  using GenPad::GenPad;
+};
+
+// Zahlenreihen: fünf Kreise, eine Zahl fehlt
+class GenSeries : public GenPad {
+  int v[5] = {}, miss = 3;
+  float t0 = 0;
+  void roll() override {
+    const int type = adult ? rndi(5) : rndi(3);
+    static const int KD[4] = {2, 3, 5, 10};
+    const int a = adult ? 2 + rndi(9) : 1 + rndi(9), d = adult ? 3 + rndi(9) : KD[rndi(4)];
+    switch (type) {
+      case 0: for (int i = 0; i < 5; i++) v[i] = a + d * i;   // +d
+        setH(adult ? "Same step every time." : "Always the same step.", adult ? "Jedes Mal derselbe Schritt." : "Immer der gleiche Schritt."); break;
+      case 1: for (int i = 0; i < 5; i++) v[i] = a + d * (4 - i);   // –d
+        setH("It goes down by the same step.", "Es wird um denselben Schritt weniger."); break;
+      case 2: { const int b = adult ? 1 + rndi(3) : 1; v[0] = b; for (int i = 1; i < 5; i++) v[i] = v[i - 1] * 2;   // verdoppeln
+        setH("Each number is double the one before.", "Jede Zahl ist doppelt so groß wie die davor."); break; }
+      case 3: { const int s = 1 + rndi(6); for (int i = 0; i < 5; i++) v[i] = (s + i) * (s + i);   // Quadratzahlen
+        setH("Square numbers: 1, 4, 9, 16 …", "Quadratzahlen: 1, 4, 9, 16 …"); break; }
+      default: { v[0] = 1 + rndi(5); v[1] = 1 + rndi(5); for (int i = 2; i < 5; i++) v[i] = v[i - 1] + v[i - 2];   // Fibonacci-artig
+        setH("Add the two numbers before.", "Addiere die zwei Zahlen davor."); break; }
+    }
+    miss = 1 + rndi(4);
+    setA(v[miss]);
+    setQ("Which number is missing?", "Welche Zahl fehlt?");
+  }
+ public:
+  using GenPad::GenPad;
+  void draw(Scene& s, const Frame& f, int lang) override {
+    const float r = 28, g = 6, x0 = CX - (5 * 2 * r + 4 * g) / 2 + r;
+    for (int i = 0; i < 5; i++) {
+      const bool q = i == miss;
+      const float x = x0 + i * (2 * r + g), y = 168 + (q ? 0 : 3 * std::sin(f.t * 3 + i));
+      s.circle(x, y, r, q ? (win.on() ? CYAN : YELLOW) : i % 2 ? MINT : PINK);
+      char b[8];
+      std::snprintf(b, sizeof b, "%d", v[i]);
+      const char* t = q && !win.on() ? "?" : b;
+      const auto& fnt = Scene::textW(fonts::num, t) <= 2 * r - 6 ? fonts::num : fonts::label;
+      s.text(fnt, t, x, y - (&fnt == &fonts::num ? 13 : 9), INK, 1, Align::Center);
+    }
+    GenPad::draw(s, f, lang);
+    (void)t0;
+  }
+};
+
+// Kettenrechnung: Zahlen und Rechenzeichen erscheinen nacheinander, am Ende das Ergebnis eintippen
+class GenChain : public GenPad {
+  int n = 4, num[6] = {}, opr[6] = {};   // opr: 0 +, 1 –, 2 ×
+  float phase0 = 0;
+  static constexpr float STEP = 1.3f;
+  float show() const { return n * STEP; }
+  void roll() override {
+    n = adult ? 5 : 3;
+    int acc = adult ? 3 + rndi(9) : 2 + rndi(8);
+    num[0] = acc; opr[0] = 0;
+    for (int i = 1; i < n; i++) {
+      int o = rndi(adult ? 3 : 2);
+      if (o == 2 && acc > 30) o = 1;
+      int x;
+      if (o == 0) x = adult ? 3 + rndi(20) : 1 + rndi(9);
+      else if (o == 1) { x = 1 + rndi(std::max(1, std::min(acc - 1, adult ? 25 : 9))); if (acc - x < 0) { o = 0; } }
+      else x = 2 + rndi(4);
+      if (o == 0) acc += x; else if (o == 1) acc -= x; else acc *= x;
+      num[i] = x; opr[i] = o;
+    }
+    setA(acc);
+    setQ("Calculate along in your head!", "Rechne im Kopf mit!");
+    setH("Keep only the running total in your head. Restart shows a new chain.", "Behalte nur das Zwischenergebnis im Kopf. Neustart zeigt eine neue Kette.");
+    phase0 = 0.5f;
+  }
+ public:
+  using GenPad::GenPad;
+  void reset() override { GenPad::reset(); }
+  void tick(const Frame& f, Host& h) override {
+    if (f.t - phase0 < show()) return;
+    GenPad::tick(f, h);
+  }
+  void draw(Scene& s, const Frame& f, int lang) override {
+    const float t = f.t - phase0, cy = 160;
+    if (t < 0) return;
+    const int i = int(t / STEP);
+    if (i < n) {
+      static const char* OP[3] = {"+", "–", "×"};
+      const float u = std::fmod(t, STEP) / STEP;
+      s.circle(CX, cy, 56 + 4 * std::sin(u * PIF), i % 2 ? YELLOW : MINT);
+      char b[8];
+      std::snprintf(b, sizeof b, "%d", num[i]);
+      const float nw = Scene::textW(fonts::huge, b), ow = i ? Scene::textW(fonts::heavy, OP[opr[i]]) + 8 : 0;
+      const float x0 = CX - (nw + ow) / 2;
+      if (i) s.text(fonts::heavy, OP[opr[i]], x0, cy - 16, INK);
+      s.text(fonts::huge, b, x0 + ow, cy - 28, INK);
+      for (int k = 0; k < n; k++) s.circle(CX - (n - 1) * 8 + k * 16, 212, 4, k <= i ? INK : G2);
+      return;
+    }
+    s.circle(CX, cy, 56, win.on() ? CYAN : G1);
+    s.text(fonts::huge, win.on() ? ans : "?", CX, cy - 28, win.on() ? INK : G3, 1, Align::Center);
+    GenPad::draw(s, f, lang);
+  }
+};
+
 }  // namespace
+
+// Zufallsmodus: eine frisch gewürfelte Aufgabe (ohne die festen Level, die wählt das Spiel selbst dazu)
+Level* makeRandomLevel(int mode) {
+  Level* l;
+  if (mode == 2) {   // Klein: nur Spiele, deren Aufgabe vorgelesen werden kann
+    switch (rndi(11)) {
+      case 0: l = new TapColor(rndi(4)); break;
+      case 1: l = new CountTap(1 + rndi(5), rndi(3)); break;
+      case 2: l = new BigSmall(rndi(2), rndi(2)); break;
+      case 3: l = new Shapes(rndi(3)); break;
+      case 4: l = new FindAnimal(rndi(7)); break;
+      case 5: { const int a = 1 + rndi(5); int b = 1 + rndi(5); if (b == a) b = a == 5 ? 3 : a + 1; l = new MoreLess(a, b, rndi(2), rndi(2)); break; }
+      case 6: l = new Balloons(3 + rndi(4), rndi(2)); break;
+      case 7: l = new Cups(0); break;
+      case 8: l = new OddOne(rndi(2)); break;
+      case 9: l = new DragHome(rndi(2)); break;
+      default: l = new Tickle(rndi(2)); break;
+    }
+    l->kids = true;
+    return l;
+  }
+  if (mode == 1) {   // Kind
+    switch (rndi(10)) {
+      case 0: case 1: case 2: l = new GenMath(false); break;
+      case 3: l = new GenSeries(false); break;
+      case 4: l = new GenChain(false); break;
+      case 5: l = new Memory7(4 + rndi(2), 3.0f); break;
+      case 6: l = new Simon(4 + rndi(3)); break;
+      case 7: l = new Cups(3 + rndi(3)); break;
+      case 8: l = new Balloons(4 + rndi(3), 2); break;
+      default: l = rndi(2) ? (Level*)new StroopSprint(6, 15) : (Level*)new Maze(2 + rndi(2)); break;
+    }
+    l->kids = true;
+    return l;
+  }
+  switch (rndi(9)) {   // Erwachsene
+    case 0: case 1: case 2: return new GenMath(true);
+    case 3: case 4: return new GenSeries(true);
+    case 5: return new GenChain(true);
+    case 6: return rndi(2) ? (Level*)new Memory7(7, 2.0f) : (Level*)new Simon(7);
+    case 7: return new Cups(8);
+    default: return rndi(2) ? (Level*)new StroopSprint() : (Level*)new Maze(4);
+  }
+}
+
+// Sätze der Zufalls-Varianten (Klein), für die Sprachausgabe: je Schlüssel einmal Aufgabe bzw. Tipp
+void randomVoices(void (*out)(const char* key, const Txt& t)) {
+  auto both = [&](Level* l) {
+    out(l->voiceKey(), l->task());
+    out(l->hintKey(), l->hint());
+    delete l;
+  };
+  for (int c = 0; c < 4; c++) both(new TapColor(c));
+  for (int k = 0; k < 3; k++) both(new CountTap(3, k));
+  for (int a = 0; a < 2; a++) for (int b = 0; b < 2; b++) both(new BigSmall(b, a));
+  for (int k = 0; k < 3; k++) both(new Shapes(k));
+  for (int a = 0; a < 7; a++) both(new FindAnimal(a));
+  for (int k = 0; k < 2; k++) for (int m = 0; m < 2; m++) both(new MoreLess(2, 4, m, k));
+  for (int m = 0; m < 3; m++) both(new Balloons(5, m));
+  for (int c = 0; c < 2; c++) both(new Cups(c * 3));
+  both(new OddOne(0));
+  for (int v = 0; v < 2; v++) both(new DragHome(v));
+  for (int v = 0; v < 2; v++) both(new Tickle(v));
+}
 
 // Kleine (unter 5 Jahre): alles wird vorgelesen, keine Zahlentastatur, keine Sperren
 Level* makeSmallLevel(int i) {

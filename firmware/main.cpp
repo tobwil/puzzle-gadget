@@ -13,6 +13,7 @@
 //   laut N         Lautstärke 0 (stumm) bis 3
 //   modus X        X = klein (16 Level, unter 5), kind (24 Level, 6–9) oder erwachsen (36 Level)
 //   menu           Einstellungen öffnen
+//   zufall         Zufallsmodus starten
 //   sag KEY        Sprach-Clip abspielen, z. B. „sag de_t05“
 //   reset          Spielstand löschen (Level, Tipps)
 //   log            Zwei-Sekunden-Protokoll (fps, Zeiten) ein/aus
@@ -235,6 +236,9 @@ static void pollSerial() {
     } else if (!strcmp(line, "mikro")) {   // Spitzenpegel seit dem letzten Aufruf (zum Einstellen der Schwellen)
       Serial.printf("mikrofon spitze %.1f dBFS, jetzt %.1f dBFS, pegel %.2f\n", float(micPeak), float(micDb), float(voiceLevel));
       micPeak = -120;
+    } else if (!strcmp(line, "zufall")) {
+      game->startRandom();
+      Serial.printf("zufall: %s\n", game->levelAnswer() ? game->levelAnswer() : "-");
     } else if (!strcmp(line, "menu")) {
       game->openSettings();
     } else if (!strncmp(line, "sag ", 4)) {
@@ -258,6 +262,7 @@ void setup() {
   const bool audio = hw::audioBegin(Synth::RATE, 75);
   Serial.printf("Audio %s\n", audio ? "ok" : "fehlt");
   store.begin();
+  bc::seedRandom(esp_random());   // jedes Spiel anders gemischt
   game = new bc::Game(synth, store);
   game->speaker = &speaker;
 
