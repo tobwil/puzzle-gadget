@@ -51,6 +51,29 @@ Englisch und Deutsch lassen sich auf dem Titelbild umschalten (EN/DE):
 | 35 | Buchstaben der Antwort auf diese Frage | 4 („vier“) |
 | 36 | 1, 11, 21, 1211, 111221, ? | 312211 |
 
+## Kinder-Modus
+
+Bei jedem Start fragt das Gerät „Wer spielt?“: **Kind** oder **Erwachsen** (änderbar über den Knopf unter der Schwierigkeit auf dem Titelbild). Beide Modi haben eigenen Spielstand, eigene Tipps und eigene Schwierigkeit; Kinder starten auf „Leicht“. Falsche Antworten sperren bei Kindern nur kurz (2 s, 3 s … höchstens 5 s).
+
+Die 24 Kinder-Level: 1–12 sind dieselben Trickrätsel wie oben, dann:
+
+| LVL | Aufgabe | Lösung (Spoiler) |
+|---|---|---|
+| 13 | 5 Schafe, alle bis auf 3 laufen weg | 3 |
+| 14 | 1 kg Federn oder 1 kg Steine? | GLEICH |
+| 15 | Merk dir die Zahl (4 Ziffern, 3 s) | jedes Mal neu |
+| 16 | Beine von 3 Hühnern und 2 Hunden | 14 |
+| 17 | Den Zweiten überholt – welcher Platz? | 2 |
+| 18 | 2 – 4 – 6 – ? – 10 | 8 |
+| 19 | Farbfolge nachtippen | 4 Farben, langsamer |
+| 20 | 1 Ei kocht 5 Minuten, 3 Eier im selben Topf? | 5 |
+| 21 | Was wird nasser, je mehr es trocknet? | HANDTUCH |
+| 22 | Kugel-Labyrinth | nur 2 Löcher |
+| 23 | Wie viele Monate haben 28 Tage? | 12 |
+| 24 | Toms Mutter hat drei Kinder: Mia, Leo und …? | TOM |
+
+Sprach-Clips für die Kinder-Aufgaben 13–24 (`k13`…`k24`) und die Frage „Wer spielt?“ (`who`) fehlen noch in `firmware/voice.bin`; bis dahin bleiben diese Karten stumm. Nachholen mit `tools/mkvoice.py` (erzeugt alle Clips neu).
+
 Tipps: Am Anfang gibt es 15, jedes erstmals gelöste Level bringt einen dazu. Ein Tipp kostet beim ersten Ansehen pro Level einen. Mit „>>“ lässt sich ein Level für 3 Tipps überspringen. Spielstand, Tipps, Sprache, Lautstärke, Schwierigkeit und Bestzeiten bleiben im NVS gespeichert.
 
 **Schwierigkeit** (Knopf auf dem Titelbild):
@@ -97,8 +120,10 @@ Serielle Befehle (115200 Baud, `pio device monitor`):
 | Befehl | Wirkung |
 |---|---|
 | `status` | Bildschirm, Level, gelöste Level, Tipps, Neigung, Mikrofonpegel |
-| `level N` | Level N (1–36) starten |
+| `level N` | Level N (1–36, Kinder 1–24) starten |
 | `stufe N` | Schwierigkeit: 0 leicht, 1 normal, 2 schwer |
+| `laut N` | Lautstärke 0 (stumm) bis 3 |
+| `modus kind`, `modus erwachsen` | Kinder- bzw. Erwachsenen-Level |
 | `sag KEY` | Sprach-Clip abspielen, z. B. `sag de_t05` |
 | `tipp X Y`, `wisch X0 Y0 X1 Y1` | Berührung nachstellen |
 | `klopf N` | N Schläge auf den Tisch nachstellen |

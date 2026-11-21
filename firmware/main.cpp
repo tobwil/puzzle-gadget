@@ -10,6 +10,8 @@
 //   wisch X0 Y0 X1 Y1   Wischen
 //   klopf N        N künstliche Schläge auf den Tisch
 //   stufe N        Schwierigkeit 0 leicht, 1 normal, 2 schwer
+//   laut N         Lautstärke 0 (stumm) bis 3
+//   modus kind     Kinder-Level (24), „modus erwachsen“: Erwachsenen-Level (36)
 //   sag KEY        Sprach-Clip abspielen, z. B. „sag de_t05“
 //   reset          Spielstand löschen (Level, Tipps)
 //   log            Zwei-Sekunden-Protokoll (fps, Zeiten) ein/aus
@@ -205,6 +207,13 @@ static void pollSerial() {
     } else if (sscanf(line, "stufe %d", &a) == 1) {
       game->setDifficulty(a);
       Serial.printf("stufe %d (0 leicht, 1 normal, 2 schwer)\n", game->difficulty());
+    } else if (sscanf(line, "laut %d", &a) == 1) {
+      game->setVol(a);
+      Serial.printf("laut %d (0 stumm … 3 laut)\n", game->volume());
+    } else if (!strncmp(line, "modus ", 6)) {
+      game->setMode(!strcmp(line + 6, "kind"));
+      game->skipWho();
+      Serial.printf("modus %s\n", game->kids() ? "kind" : "erwachsen");
     } else if (!strncmp(line, "sag ", 4)) {
       speaker.speak(line + 4);
     } else if (!strcmp(line, "reset")) {

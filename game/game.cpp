@@ -1,5 +1,6 @@
 #include "game.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -42,7 +43,12 @@ const IntroPage INTRO_PAGES[3] = {
 };
 const Txt T_YES{"YES", "JA"}, T_NO{"NO", "NEIN"}, T_OK{"OK", "OK"};
 const Txt T_SOLVED{"Level solved!", "Level geschafft!"}, T_PLUS{"+1 hint", "+1 Tipp"}, T_NEXT{"NEXT", "WEITER"};
-const Txt T_GENIUS{"GENIUS!", "GENIAL!"}, T_ALL{"All 36 puzzles solved.", "Alle 36 Rätsel gelöst."}, T_BACKTAP{"Tap to go back", "Tippen zum Start"};
+const Txt T_GENIUS{"GENIUS!", "GENIAL!"}, T_ALL{"All %d puzzles solved.", "Alle %d Rätsel gelöst."}, T_BACKTAP{"Tap to go back", "Tippen zum Start"};
+const Txt T_WHO{"WHO IS PLAYING?", "WER SPIELT?"}, T_KID{"CHILD", "KIND"}, T_ADULT{"ADULT", "ERWACHSEN"};
+const Txt T_KIDSUB{"easier puzzles", "leichtere Rätsel"}, T_ADULTSUB{"hard puzzles", "schwere Rätsel"};
+const Txt T_WHOLATER{"You can change this on the title screen.", "Das kannst du auf dem Titelbild ändern."};
+const Txt T_MODE[2] = {{"ADULT", "ERWACHSEN"}, {"CHILD", "KIND"}};
+const Txt T_WHOSAY{"Who is playing? A child or an adult?", "Wer spielt? Ein Kind oder ein Erwachsener?"};
 const char* const PRAISE[2][5] = {{"NICE!", "BRAVO!", "WOW!", "SMART!", "GENIUS!"}, {"STARK!", "BRAVO!", "WOW!", "SUPER!", "GENIAL!"}};
 const Txt NOPES[] = {{"Nope!", "Nö!"}, {"Hmm… no.", "Hmm… nein."}, {"Not quite!", "Nicht ganz!"}, {"Try again!", "Nochmal!"}};
 
@@ -53,34 +59,54 @@ constexpr float OB_Y = 318, OB_H = 52;
 }  // namespace
 
 Game::Game(dk::Synth& synth, dk::Store& store) : synth_(synth), store_(store) {
-  for (int i = 0; i < LEVELS; i++) levels_[i] = makeLevel(i);
-  done_ = uint32_t(store_.get("bc_done", 0)) | uint64_t(uint32_t(store_.get("bc_done2", 0))) << 32;
-  hintUsed_ = uint32_t(store_.get("bc_used", 0)) | uint64_t(uint32_t(store_.get("bc_used2", 0))) << 32;
-  hints_ = store_.get("bc_hints", 15);
   lang_ = store_.get("bc_lang", 0);
   vol_ = store_.get("bc_vol", store_.get("bc_snd", 1) ? 2 : 0) & 3;
-  diff_ = store_.get("bc_diff", 1) % 3;
-  cur_ = store_.get("bc_cur", 0) % LEVELS;
   setVolume(vol_);
-  if (!store_.get("bc_intro", 0)) screen_ = INTRO;
   if (store_.get("bc_ver", 1) < 3) {   // neue, schwere Fassung: Spielstand komplett auf null, Intro wieder von vorn
     resetProgress();
     store_.set("bc_intro", 0);
-    screen_ = INTRO;
     store_.set("bc_ver", 3);
   }
+  kids_ = store_.get("bc_kids", 0) != 0;
+  loadProgress();
+  screen_ = WHO;   // bei jedem Start: Wer spielt?
   motion.threshold = 0.12f;
 }
 
 Game::~Game() { for (auto* l : levels_) delete l; }
 
+const char* Game::key(const char* name) const {
+  std::snprintf(key_, sizeof key_, "%s_%s", kids_ ? "bk" : "bc", name);
+  return key_;
+}
+
+void Game::loadProgress() {
+  for (auto*& l : levels_) { delete l; l = nullptr; }
+  for (int i = 0; i < levelCount(); i++) levels_[i] = kids_ ? makeKidLevel(i) : makeLevel(i);
+  const uint32_t d0 = store_.get(key("done"), 0), d1 = store_.get(key("done2"), 0);
+  const uint32_t u0 = store_.get(key("used"), 0), u1 = store_.get(key("used2"), 0);
+  done_ = d0 | uint64_t(d1) << 32;
+  hintUsed_ = u0 | uint64_t(u1) << 32;
+  hints_ = store_.get(key("hints"), 15);
+  diff_ = store_.get(key("diff"), kids_ ? 0 : 1) % 3;   // Kinder starten auf „Leicht“
+  cur_ = store_.get(key("cur"), 0) % levelCount();
+}
+
+void Game::setMode(bool kids) {
+  kids_ = kids;
+  store_.set("bc_kids", kids ? 1 : 0);
+  loadProgress();
+  overlay_ = NONE;
+  pickPage_ = 0;
+}
+
 void Game::save() {
-  store_.set("bc_done", int(uint32_t(done_)));
-  store_.set("bc_done2", int(uint32_t(done_ >> 32)));
-  store_.set("bc_used", int(uint32_t(hintUsed_)));
-  store_.set("bc_used2", int(uint32_t(hintUsed_ >> 32)));
-  store_.set("bc_hints", hints_);
-  store_.set("bc_cur", cur_);
+  store_.set(key("done"), int(uint32_t(done_)));
+  store_.set(key("done2"), int(uint32_t(done_ >> 32)));
+  store_.set(key("used"), int(uint32_t(hintUsed_)));
+  store_.set(key("used2"), int(uint32_t(hintUsed_ >> 32)));
+  store_.set(key("hints"), hints_);
+  store_.set(key("cur"), cur_);
 }
 
 void Game::setVolume(int v) {
@@ -101,7 +127,7 @@ void Game::enterLevel(int i) {
   overlay_ = TASK;
   overlayT_ = 0;
   char k[8];
-  std::snprintf(k, sizeof k, "t%02d", cur_ + 1);
+  std::snprintf(k, sizeof k, kids_ && cur_ >= 12 ? "k%02d" : "t%02d", cur_ + 1);   // Kinder 13–24 haben eigene Aufgaben
   speak(k);
 }
 
@@ -111,18 +137,18 @@ void Game::resetProgress() {
   cur_ = 0;
   save();
   char k[8];
-  for (int i = 0; i < LEVELS; i++) { std::snprintf(k, sizeof k, "bc_t%d", i); if (store_.get(k, 0)) store_.set(k, 0); }   // Bestzeiten
+  for (int i = 0; i < levelCount(); i++) { std::snprintf(k, sizeof k, "t%d", i); if (store_.get(key(k), 0)) store_.set(key(k), 0); }   // Bestzeiten
   screen_ = TITLE;
   overlay_ = NONE;
 }
 
 int Game::nextLevel() const {
-  for (int i = 0; i < LEVELS; i++) if (!isDone(i)) return i;
+  for (int i = 0; i < levelCount(); i++) if (!isDone(i)) return i;
   return cur_;
 }
 
 void Game::startLevel(int i) {
-  cur_ = (i % LEVELS + LEVELS) % LEVELS;
+  cur_ = (i % levelCount() + levelCount()) % levelCount();
   levels_[cur_]->reset();
   levels_[cur_]->solved = false;
   levelT_ = 0;
@@ -132,9 +158,9 @@ void Game::startLevel(int i) {
   nRemarks_ = 0;
   autoHinted_ = newBest_ = false;
   char k[8];
-  std::snprintf(k, sizeof k, "bc_t%d", cur_);
-  bestT_ = store_.get(k, 0);
-  store_.set("bc_cur", cur_);
+  std::snprintf(k, sizeof k, "t%d", cur_);
+  bestT_ = store_.get(key(k), 0);
+  store_.set(key("cur"), cur_);
 }
 
 // ---------------- Host ----------------
@@ -154,8 +180,8 @@ void Game::solve() {
     if (bestT_ == 0 || t < bestT_) {
       newBest_ = bestT_ != 0;
       bestT_ = t;
-      std::snprintf(k, sizeof k, "bc_t%d", cur_);
-      store_.set(k, t);
+      std::snprintf(k, sizeof k, "t%d", cur_);
+      store_.set(key(k), t);
     }
   }
 }
@@ -274,12 +300,13 @@ void Game::tick(const dk::Input& in) {
     const float dx = x_ - sx_;
     const bool swipe = !isTap && std::fabs(dx) > 60 && std::fabs(dx) > std::fabs(y_ - sy_);
     if (swipe && screen_ == INTRO) { introPage_ = clampf(introPage_ + (dx < 0 ? 1 : -1), 0, 2); sfx(SFX_CLICK); }
-    else if (swipe && screen_ == PICK) { pickPage_ = clampf(pickPage_ + (dx < 0 ? 1 : -1), 0, 2); sfx(SFX_CLICK); }
+    else if (swipe && screen_ == PICK) { pickPage_ = clampf(pickPage_ + (dx < 0 ? 1 : -1), 0, pages() - 1); sfx(SFX_CLICK); }
     else if (isTap) tap(x_, y_);
     uiTouch_ = false;
     pressedBtn_ = -1;
   }
 
+  if (screen_ == WHO && !whoSpoken_ && speaker) { whoSpoken_ = true; speak("who"); }
   if (screen_ == PLAY && overlay_ != TASK) {
     Level* l = levels_[cur_];
     levelT_ += dt;
@@ -328,7 +355,7 @@ void Game::tap(float x, float y) {
       done_ |= uint64_t(1) << cur_;
       save();
       sfx(SFX_WHOOSH);
-      if (cur_ + 1 < LEVELS) enterLevel(cur_ + 1);
+      if (cur_ + 1 < levelCount()) enterLevel(cur_ + 1);
       else { screen_ = END; overlay_ = NONE; }
     } else if (!can || inRect(x, y, W - 176, OB_Y, 136, OB_H)) {
       overlay_ = NONE;
@@ -340,11 +367,20 @@ void Game::tap(float x, float y) {
     if (overlayT_ < 0.4f) return;
     sfx(SFX_CLICK);
     const int n = nextLevel();
-    if (done_ == (uint64_t(1) << LEVELS) - 1 && cur_ == LEVELS - 1) { screen_ = END; overlay_ = NONE; }
-    else enterLevel(cur_ + 1 < LEVELS && !isDone(cur_ + 1) ? cur_ + 1 : n);
+    const int nl = levelCount();
+    if (done_ == (uint64_t(1) << nl) - 1 && cur_ == nl - 1) { screen_ = END; overlay_ = NONE; }
+    else enterLevel(cur_ + 1 < nl && !isDone(cur_ + 1) ? cur_ + 1 : n);
     return;
   }
   switch (screen_) {
+    case WHO:
+      if (inRect(x, y, 280, 8, 80, 56)) { lang_ ^= 1; store_.set("bc_lang", lang_); sfx(SFX_CLICK); }
+      else if (inRect(x, y, 18, 108, 166, 240) || inRect(x, y, 184, 108, 166, 240)) {
+        setMode(x < 184);
+        sfx(SFX_POP);
+        screen_ = store_.get("bc_intro", 0) ? TITLE : INTRO;
+      }
+      break;
     case INTRO:
       if (inRect(x, y, W - 150, 0, 150, 60) || (introPage_ == 2 && inRect(x, y, W / 2 - 100, 376, 200, 64))) {
         store_.set("bc_intro", 1);
@@ -359,15 +395,16 @@ void Game::tap(float x, float y) {
       else if (inRect(x, y, 280, 8, 80, 56)) { lang_ ^= 1; store_.set("bc_lang", lang_); sfx(SFX_CLICK); }
       else if (inRect(x, y, 214, 8, 62, 56)) { setVolume((vol_ + 1) & 3); store_.set("bc_vol", vol_); sfx(SFX_CLICK); }
       else if (inRect(x, y, 156, 8, 56, 56)) { screen_ = INTRO; introPage_ = 0; sfx(SFX_CLICK); }
-      else if (inRect(x, y, 22, 190, 150, 46)) { setDifficulty(diff_ + 1); sfx(SFX_CLICK); }
+      else if (inRect(x, y, 22, 190, 150, 44)) { setDifficulty(diff_ + 1); sfx(SFX_CLICK); }
+      else if (inRect(x, y, 22, 236, 150, 44)) { screen_ = WHO; whoSpoken_ = false; sfx(SFX_CLICK); }
       break;
     case PICK:
       if (y < 72 && x < 80) { screen_ = TITLE; sfx(SFX_CLICK); break; }
-      if (y > 382) { pickPage_ = clampf(int((x - (W / 2 - 156)) / 104), 0, 2); sfx(SFX_CLICK); break; }
+      if (y > 382) { pickPage_ = clampf(int((x - (W / 2 - pages() * 52)) / 104), 0, pages() - 1); sfx(SFX_CLICK); break; }
       for (int k = 0; k < 12; k++) {
         const int i = pickPage_ * 12 + k;
         const float tx = TX0 + (k % 3) * (TW + TGX), ty = TY0 + (k / 3) * (TH + TGY);
-        if (i < LEVELS && inRect(x, y, tx - 4, ty - 4, TW + 8, TH + 8)) {
+        if (i < levelCount() && inRect(x, y, tx - 4, ty - 4, TW + 8, TH + 8)) {
           if (unlocked(i)) { sfx(SFX_POP); enterLevel(i); }
           else sfx(SFX_NOPE);
         }
@@ -449,14 +486,20 @@ void Game::drawTitle(Scene& s) {
   const float dk = 0.95f, dx = 246, dy = 262;
   drawDinoHead(s, dx, dy, dk, 0.5f + 0.05f * std::sin(t * 2), std::fmod(t, 5.f) < 0.12f ? 1 : 0);
   drawCandy(s, dx - 34 * dk, dy + 28 * dk, 1.35f, PINK);
-  sparkle(s, 58, 262, 12, INK, 1, 0.2f);
-  sparkle(s, 96, 300, 8, INK, 1, 0.6f);
+  sparkle(s, 54, 308, 12, INK, 1, 0.2f);
+  sparkle(s, 104, 318, 8, INK, 1, 0.6f);
   sparkle(s, 344, 250, 9, INK, 1, 0.1f);
   // Schwierigkeit: drei Balken und Name
   static const Col DC[3] = {MINT, CYAN, HOTPINK};
   s.rrect(30, 196, 126, 34, 17, BTN);
   for (int i = 0; i < 3; i++) s.rrect(44 + i * 7, 220 - 6 - i * 4, 5, 8 + i * 4, 1.5f, i <= diff_ ? DC[diff_] : G3);
   s.text(fonts::label, tr(T_DIFF[diff_], lang_), 104, 204, INK, 1, Align::Center);
+  // Wer spielt (führt zurück zur Auswahl)
+  s.rrect(30, 242, 126, 34, 17, BTN);
+  const float hk = kids_ ? 0.8f : 1.f;   // kleines Männchen, beim Kind kleiner
+  s.circle(51, 262 - 12 * hk, 4.5f * hk, kids_ ? HOTPINK : INK);
+  s.capsule(51, 264 - 5 * hk, 51, 268, 4.5f * hk, kids_ ? HOTPINK : INK);
+  s.text(fonts::label, tr(T_MODE[kids_], lang_), 108, 250, INK, 1, Align::Center);
   // oben rechts: Anleitung, Ton und Sprache
   s.circle(184, 35, 17, BTN);
   s.text(fonts::heavy, "?", 184, 18, INK, 1, Align::Center);
@@ -480,16 +523,17 @@ void Game::drawLevels(Scene& s) {
   s.capsule(W / 2 - tw / 2 - 3, HEAD_Y + 5, W / 2 + tw / 2 + 3, HEAD_Y + 3, 8, YELLOW);
   s.text(fonts::heavy, tr(T_LEVELS, lang_), W / 2, HEAD_Y - 18, INK, 1, Align::Center);
   const int next = nextLevel();
-  static const char* PAGES[3] = {"1 – 12", "13 – 24", "25 – 36"};
-  for (int p = 0; p < 3; p++) {   // Seitenwahl unten
+  for (int p = 0; p < pages(); p++) {   // Seitenwahl unten
     const bool on = p == pickPage_;
-    const float bx = W / 2 - 152 + p * 104;
+    const float bx = W / 2 - pages() * 52 + 4 + p * 104;
+    char pb[16];
+    std::snprintf(pb, sizeof pb, "%d – %d", p * 12 + 1, std::min(levelCount(), p * 12 + 12));
     s.rrect(bx, 390, 96, 36, 18, on ? INK : BTN);
-    s.text(fonts::label, PAGES[p], bx + 48, 399, on ? WHITE : INK, 1, Align::Center);
+    s.text(fonts::label, pb, bx + 48, 399, on ? WHITE : INK, 1, Align::Center);
   }
   for (int k = 0; k < 12; k++) {
     const int i = pickPage_ * 12 + k;
-    if (i >= LEVELS) break;
+    if (i >= levelCount()) break;
     const float x = TX0 + (k % 3) * (TW + TGX), y = TY0 + (k / 3) * (TH + TGY);
     const bool done = isDone(i), open = unlocked(i);
     s.rrect(x, y, TW, TH, 16, done ? INK : open ? WHITE : G1);
@@ -504,7 +548,9 @@ void Game::drawLevels(Scene& s) {
 void Game::drawEnd(Scene& s) {
   s.circle(96, 132, 52, YELLOW);
   s.text(fonts::huge, tr(T_GENIUS, lang_), W / 2, 96, INK, 1, Align::Center);
-  s.text(fonts::hand, tr(T_ALL, lang_), W / 2, 152, INK, 1, Align::Center);
+  char b[48];
+  std::snprintf(b, sizeof b, tr(T_ALL, lang_), levelCount());
+  s.text(fonts::hand, b, W / 2, 152, INK, 1, Align::Center);
   drawDino(s, W / 2, 284, 1.1f, 1);
   for (int i = 0; i < 6; i++) sparkle(s, 44 + i * 56, 210 + (i % 2) * 40, 8 + i % 3 * 3, i % 2 ? CYAN : INK, 1, now_ + i);
   s.text(fonts::label, tr(T_BACKTAP, lang_), W / 2, 392, G4, 1, Align::Center);
@@ -611,6 +657,36 @@ void Game::drawTaskCard(Scene& s, float a) {
   s.text(fonts::heavy, tr(T_GO, lang_), W / 2, OB_Y + 23, WHITE, a, Align::Center);
 }
 
+void Game::drawWho(Scene& s) {
+  const float t = now_;
+  s.rrect(290, 20, 50, 30, 15, BTN);
+  s.text(fonts::label, lang_ ? "DE" : "EN", 315, 26, INK, 1, Align::Center);
+  const char* q = tr(T_WHO, lang_);
+  const float tw = Scene::textW(fonts::heavy, q);
+  s.capsule(W / 2 - tw / 2 - 3, 91, W / 2 + tw / 2 + 3, 89, 8, CYAN);
+  s.text(fonts::heavy, q, W / 2, 68, INK, 1, Align::Center);
+  for (int k = 0; k < 2; k++) {   // links Kind, rechts Erwachsen
+    const bool kid = k == 0, cur = kid == kids_;
+    const float x = kid ? 24 : 192, cx = x + 76;
+    const bool down = down_ && uiTouch_ && inRect(sx_, sy_, kid ? 18 : 184, 108, 166, 240);
+    if (cur) s.rrect(x - 3, 113, 158, 232, 25, INK);
+    s.rrect(x, 116, 152, 226, 22, down ? BTN_DOWN : cur ? WHITE : BTN);
+    s.circle(cx, 192, 50, kid ? YELLOW : CYAN);
+    if (kid) drawDino(s, cx + 12, 204, 0.56f, 1);
+    else drawOwl(s, cx, 204, 0.5f, 1, t);
+    const char* name = tr(kid ? T_KID : T_ADULT, lang_);
+    const auto& fnt = Scene::textW(fonts::heavy, name) <= 140 ? fonts::heavy : fonts::body;
+    s.text(fnt, name, cx, &fnt == &fonts::heavy ? 264 : 270, INK, 1, Align::Center);
+    char b[24];
+    std::snprintf(b, sizeof b, "%d %s", kid ? KID_LEVELS : LEVELS, lang_ ? "Level" : "levels");
+    s.text(fonts::label, b, cx, 298, INK, 1, Align::Center);
+    s.text(fonts::label, tr(kid ? T_KIDSUB : T_ADULTSUB, lang_), cx, 316, G4, 1, Align::Center);
+  }
+  sparkle(s, 34, 104, 9, INK, 1, t);
+  sparkle(s, 336, 106, 8, CYAN, 1, t + 1);
+  textWrap(s, fonts::label, tr(T_WHOLATER, lang_), W / 2, 366, 280, G4);
+}
+
 void Game::drawIntro(Scene& s) {
   const IntroPage& p = INTRO_PAGES[introPage_];
   s.text(fonts::label, tr(T_SKIPINTRO, lang_), W - 30, 30, G4, 1, Align::Right);
@@ -648,6 +724,7 @@ void Game::draw(Scene& s) {
   switch (screen_) {
     case TITLE: drawTitle(s); break;
     case INTRO: drawIntro(s); break;
+    case WHO: drawWho(s); break;
     case PICK: drawLevels(s); break;
     case END: drawEnd(s); break;
     case PLAY: {
@@ -681,14 +758,23 @@ void Game::voiceLines(void (*out)(const char* key, const char* text)) {
       out(k, tr(l->task(), lang));
       delete l;
     }
+    for (int i = 12; i < KID_LEVELS; i++) {   // Kinder 13–24 (1–12 wie bei den Erwachsenen)
+      Level* l = makeKidLevel(i);
+      std::snprintf(k, sizeof k, "%s_k%02d", L, i + 1);
+      out(k, tr(l->task(), lang));
+      delete l;
+    }
+    std::snprintf(k, sizeof k, "%s_who", L);
+    out(k, tr(T_WHOSAY, lang));
     for (int i = 0; i < 5; i++) { std::snprintf(k, sizeof k, "%s_p%d", L, i); out(k, PRAISE[lang][i]); }
     for (int i = 0; i < 4; i++) { std::snprintf(k, sizeof k, "%s_n%d", L, i); out(k, tr(NOPES[i], lang)); }
   }
 }
 
 const char* Game::debug() {
-  std::snprintf(dbg_, sizeof dbg_, "screen %d level %d overlay %d solved 0x%09llx hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
-                int(screen_), cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_, motion.tiltX, motion.tiltY, motion.tiltZ);
+  std::snprintf(dbg_, sizeof dbg_, "screen %d modus %s level %d overlay %d solved 0x%09llx hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
+                int(screen_), kids_ ? "kind" : "erwachsen", cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_,
+                motion.tiltX, motion.tiltY, motion.tiltZ);
   return dbg_;
 }
 

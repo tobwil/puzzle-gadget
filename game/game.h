@@ -30,12 +30,19 @@ class Game : Host {
   void setLang(int l) { lang_ = l & 1; }
   void skipIntro() { if (screen_ == INTRO) screen_ = TITLE; }
   int difficulty() const { return diff_; }
-  void setDifficulty(int d) { diff_ = (d % 3 + 3) % 3; store_.set("bc_diff", diff_); }
+  void setDifficulty(int d) { diff_ = (d % 3 + 3) % 3; store_.set(key("diff"), diff_); }
+  // Wer spielt: Kinder haben eigene Level, eigenen Spielstand und eigene Schwierigkeit
+  bool kids() const { return kids_; }
+  int volume() const { return vol_; }
+  void setVol(int v) { setVolume(v); store_.set("bc_vol", vol_); }   // 0 = stumm … 3 = laut
+  void setMode(bool kids);
+  int levelCount() const { return kids_ ? KID_LEVELS : LEVELS; }
+  void skipWho() { if (screen_ == WHO) screen_ = store_.get("bc_intro", 0) ? TITLE : INTRO; }
   dk::Motion motion;
   dk::Speaker* speaker = nullptr;
 
  private:
-  enum Screen { TITLE, PICK, PLAY, END, INTRO };
+  enum Screen { TITLE, PICK, PLAY, END, INTRO, WHO };
   enum Overlay { NONE, HINT, SKIP, SOLVED, TASK };
 
   // Host
@@ -52,6 +59,10 @@ class Game : Host {
   void drawEnd(Scene& s);
   void drawOverlay(Scene& s);
   void drawIntro(Scene& s);
+  void drawWho(Scene& s);
+  void loadProgress();
+  const char* key(const char* name) const;   // Speicherschlüssel des aktuellen Modus („bc_…“ bzw. „bk_…“)
+  int pages() const { return (levelCount() + 11) / 12; }
   void drawTaskCard(Scene& s, float a);
   void speak(const char* what);
   int skipCost() const { return diff_ == 0 ? 1 : 3; }
@@ -66,7 +77,9 @@ class Game : Host {
   dk::Synth& synth_;
   dk::Store& store_;
   Level* levels_[LEVELS] = {};
-  Screen screen_ = TITLE;
+  bool kids_ = false, whoSpoken_ = false;
+  mutable char key_[16];
+  Screen screen_ = WHO;
   Overlay overlay_ = NONE;
   float overlayT_ = 0;
   int cur_ = 0;

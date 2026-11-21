@@ -78,10 +78,13 @@ class Level {
   // Lösung als Ziffernfolge (für die Simulator-Tour); nullptr, wenn das Level keine hat
   virtual const char* answer() const { return nullptr; }
   bool solved = false;
+  bool kids = false;   // Kinder-Modus: kürzere Sperren nach falschen Antworten
 };
 
-constexpr int LEVELS = 36;
-Level* makeLevel(int i);   // 0 .. LEVELS-1
+constexpr int LEVELS = 36;       // Erwachsene
+constexpr int KID_LEVELS = 24;   // Kinder
+Level* makeLevel(int i);      // 0 .. LEVELS-1
+Level* makeKidLevel(int i);   // 0 .. KID_LEVELS-1 (0–11 wie bei den Erwachsenen)
 
 // ---------------- Layout ----------------
 constexpr float HEAD_Y = 40;       // Mitte der Kopfzeile („<  LVL.3  >>“)

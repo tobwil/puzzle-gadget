@@ -152,6 +152,9 @@ static int tour(const char* dir) {
     sim.game.setLang(lang);
     printf("== Sprache %s ==\n", lang ? "de" : "en");
     sim.wait(1);
+    sim.shot("wer_spielt");
+    sim.tap(268, 230);   // Erwachsen
+    sim.wait(0.3f);
     for (int p = 0; p < 3; p++) {   // Intro beim ersten Start: drei Karten
       sim.shot(("intro" + std::to_string(p + 1)).c_str());
       sim.tap(184, 408);
@@ -266,6 +269,57 @@ static int tour(const char* dir) {
     sim.tap(184, 360);
     sim.wait(0.6f);
     sim.shot("ende");
+
+    // ---- Kinder ----
+    sim.tap(184, 300);
+    sim.tap(90, 259);    // Titelbild: Knopf „Erwachsen“ führt zur Auswahl
+    sim.wait(0.3f);
+    sim.shot("wer_spielt_wieder");
+    sim.tap(100, 230);   // Kind
+    sim.wait(0.3f);
+    sim.shot("kind_titel");
+    if (!sim.game.kids() || sim.game.difficulty() != 0) { printf("Kinder-Modus nicht gewählt\n"); fails++; }
+    sim.tap(296, 384);
+    sim.wait(0.3f);
+    sim.shot("kind_levels");
+    sim.tap(36, 40);
+    static const Fn KSOLVE[bc::KID_LEVELS - 12] = {
+        [](Sim& s) { s.type("2"); s.wait(2.3f); s.typeAnswer(); },                        // Schafe: 2 (Falle), dann 3
+        [](Sim& s) { s.tap(102, 261); s.wait(2.3f); s.tap(184, 311); },                   // Federn (falsch), GLEICH
+        [](Sim& s) { s.wait(3.6f); s.typeAnswer(); },                                     // 4 Ziffern merken
+        [](Sim& s) { s.typeAnswer(); },                                                   // Beine
+        [](Sim& s) { s.type("1"); s.wait(2.3f); s.typeAnswer(); },                        // Wettrennen
+        [](Sim& s) { s.typeAnswer(); },                                                   // Zahlenreihe
+        [](Sim& s) {                                                                      // Farbfolge (4)
+          s.wait(4.5f);
+          for (const char* c = s.game.levelAnswer(); *c; c++) { const int k = *c - '0'; s.tap(k % 2 ? 238 : 134, k / 2 ? 256 : 170); }
+        },
+        [](Sim& s) { s.typeAnswer(); },                                                   // Eier
+        [](Sim& s) { s.tap(102, 261); },                                                  // Handtuch
+        [](Sim& s) {                                                                      // Labyrinth mit zwei Löchern
+          s.imu.tiltX = -0.5f; s.wait(2.0f);
+          s.imu.tiltX = 0; s.imu.tiltY = 0.5f; s.wait(1.6f);
+          s.imu.tiltX = 0.5f; s.imu.tiltY = -0.25f; s.wait(2.6f);
+          s.imu.tiltX = s.imu.tiltY = 0;
+        },
+        [](Sim& s) { s.typeAnswer(); },                                                   // Monate
+        [](Sim& s) { s.tap(266, 261); },                                                  // Tom
+    };
+    for (int i = 0; i < bc::KID_LEVELS; i++) {
+      sim.game.startLevel(i);
+      sim.wait(0.6f);
+      sim.shot(("kind" + std::to_string(i + 1) + "_start").c_str());
+      if (i < 12) SOLVE[i](sim); else KSOLVE[i - 12](sim);
+      sim.wait(0.15f);
+      sim.shot(("kind" + std::to_string(i + 1) + "_aktion").c_str());
+      sim.wait(1.6f);
+      const bool ok = (sim.game.doneMask() >> i) & 1;
+      printf("Kind %2d: %s\n", i + 1, ok ? "gelöst" : "NICHT GELÖST");
+      if (!ok) fails++;
+    }
+    sim.game.enterLevel(12);
+    sim.wait(0.6f);
+    sim.shot("kind_karte");
   }
   printf("%d Level nicht gelöst, %d Textprobleme\n", fails, nIssues);
   return fails || nIssues ? 1 : 0;

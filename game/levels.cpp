@@ -48,7 +48,11 @@ struct Lock {
   float until = -1;
   bool on(const Frame& f) const { return f.t < until; }
   float left(const Frame& f) const { return until - f.t; }
-  void fail(const Frame& f) { fails++; until = f.t + std::fmin(30.f, 4.f * float(1 << std::min(fails - 1, 4))); }
+  // Kinder: 2 s, 3 s, 4 s … höchstens 5 s
+  void fail(const Frame& f, bool kids = false) {
+    fails++;
+    until = f.t + (kids ? std::fmin(5.f, 1.f + fails) : std::fmin(30.f, 4.f * float(1 << std::min(fails - 1, 4))));
+  }
   void reset() { fails = 0; until = -1; }
 };
 
@@ -233,7 +237,7 @@ class CountCandy : public Level {
     }
     if (pad.tick(f, h, lock.on(f))) {
       if (pad.is("6")) { win.start(f); h.sfx(SFX_WIN); }
-      else { lock.fail(f); pad.wrong(f); h.nope(CX, NP_DY - 30); }
+      else { lock.fail(f, kids); pad.wrong(f); h.nope(CX, NP_DY - 30); }
     }
   }
   void draw(Scene& s, const Frame& f, int) override {
@@ -713,7 +717,7 @@ class Quiz : public Level {
     y = i / 2 ? GY1 : GY0;
   }
   void fail(const Frame& f, Host& h, const char* given) {
-    lock.fail(f);
+    lock.fail(f, kids);
     pad.wrong(f);
     wrongT = f.t;
     if (q.showFor > 0) phase0 = lock.until;
@@ -918,9 +922,58 @@ const QuizSpec Q_LOOKSAY{
     {"Read each number aloud: 1211 is “one 1, one 2, two 1s”.", "Lies jede Zahl laut vor: 1211 ist „eine 1, eine 2, zwei 1“."},
     "312211", 0, 0, {}, nullptr, {}, nullptr, 0};
 
+// ---- Kinder (13–24): kurze Denkfallen, kleine Zahlen ----
+void artSeries(Scene& s, float t, float won, int) {
+  static const char* N[5] = {"2", "4", "6", "?", "10"};
+  const float r = 26, g = 8, x0 = CX - (5 * 2 * r + 4 * g) / 2 + r;
+  for (int i = 0; i < 5; i++) {
+    const bool q = i == 3;
+    const float x = x0 + i * (2 * r + g), y = 172 + (q ? 0 : 3 * std::sin(t * 3 + i));
+    s.circle(x, y, r, q ? (won > 0 ? CYAN : YELLOW) : i % 2 ? MINT : PINK);
+    s.text(fonts::num, q && won > 0 ? "8" : N[i], x, y - 13, INK, 1, Align::Center);
+  }
+}
+
+const QuizSpec K_SHEEP{
+    {"A farmer has 5 sheep. All but 3 run away. How many sheep are left?", "Ein Bauer hat 5 Schafe. Alle bis auf 3 laufen weg. Wie viele Schafe bleiben übrig?"},
+    {"“All but 3” means: 3 stay.", "„Alle bis auf 3“ heißt: 3 bleiben da."},
+    "3", 0, 0, {}, "2", {"Read it again: all BUT 3!", "Lies nochmal: alle BIS AUF 3!"}, nullptr, 0};
+const QuizSpec K_FEATHERS{
+    {"What is heavier: 1 kg of feathers or 1 kg of stones?", "Was ist schwerer: 1 kg Federn oder 1 kg Steine?"},
+    {"Look at the numbers, not at the things.", "Schau auf die Zahlen, nicht auf die Sachen."},
+    nullptr, 3, 2, {{"FEATHERS", "FEDERN"}, {"STONES", "STEINE"}, {"SAME", "GLEICH"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_LEGS{
+    {"How many legs do 3 chickens and 2 dogs have together?", "Wie viele Beine haben 3 Hühner und 2 Hunde zusammen?"},
+    {"A chicken has 2 legs, a dog has 4.", "Ein Huhn hat 2 Beine, ein Hund hat 4."},
+    "14", 0, 0, {}, "20", {"Chickens only have 2 legs!", "Hühner haben nur 2 Beine!"}, nullptr, 0};
+const QuizSpec K_RACE{
+    {"In a race you overtake the runner in second place. Which place are you in now?", "Beim Wettrennen überholst du den Zweiten. Auf welchem Platz bist du jetzt?"},
+    {"You take HIS place. Who is still in front of you?", "Du nimmst SEINEN Platz ein. Wer ist noch vor dir?"},
+    "2", 0, 0, {}, "1", {"The winner is still ahead!", "Der Erste ist noch vor dir!"}, nullptr, 0};
+const QuizSpec K_SERIES{
+    {"Which number is missing?", "Welche Zahl fehlt?"},
+    {"Look how much it grows each time.", "Schau, um wie viel es jedes Mal größer wird."},
+    "8", 0, 0, {}, nullptr, {}, artSeries, 0};
+const QuizSpec K_EGGS{
+    {"One egg takes 5 minutes to boil. How many minutes do 3 eggs take in the same pot?", "Ein Ei kocht 5 Minuten. Wie viele Minuten brauchen 3 Eier im selben Topf?"},
+    {"They are all in the pot at the same time!", "Sie sind alle gleichzeitig im Topf!"},
+    "5", 0, 0, {}, "15", {"They all cook at the same time!", "Die kochen doch alle gleichzeitig!"}, nullptr, 0};
+const QuizSpec K_TOWEL{
+    {"What gets wetter the more it dries?", "Was wird nasser, je mehr es trocknet?"},
+    {"What do you use after a bath?", "Was nimmst du nach dem Baden?"},
+    nullptr, 3, 0, {{"TOWEL", "HANDTUCH"}, {"SUN", "SONNE"}, {"WIND", "WIND"}}, nullptr, {}, nullptr, 0};
+const QuizSpec K_MONTHS{
+    {"How many months have 28 days?", "Wie viele Monate haben 28 Tage?"},
+    {"Not only February has 28 days …", "Nicht nur der Februar hat 28 Tage …"},
+    "12", 0, 0, {}, "1", {"The others have 28 days too – and more!", "Die anderen haben auch 28 Tage – und mehr!"}, nullptr, 0};
+const QuizSpec K_TOM{
+    {"Tom's mother has three children: Mia, Leo and …?", "Toms Mutter hat drei Kinder: Mia, Leo und …?"},
+    {"Read the very first word again.", "Lies das allererste Wort nochmal."},
+    nullptr, 3, 1, {{"BEN", "BEN"}, {"TOM", "TOM"}, {"LISA", "LISA"}}, nullptr, {}, nullptr, 0};
+
 uint32_t lcg(uint32_t& s) { s = s * 1664525u + 1013904223u; return s >> 8; }
 
-// ======================= Merk dir die Zahl (7 Ziffern, 2 s) =======================
+// ======================= Merk dir die Zahl (Erwachsene: 7 Ziffern, 2 s; Kinder: 4 Ziffern, 3 s) =======================
 class Memory7 : public Level {
   Win win;
   NumPad pad;
@@ -928,15 +981,23 @@ class Memory7 : public Level {
   char num[8] = {};
   float phase0 = 0;
   uint32_t seed = 0x5EED;
-  static constexpr float SHOW = 2.0f;
+  const int len;
+  const float SHOW;
   void fresh() {
     num[0] = char('1' + lcg(seed) % 9);
-    for (int i = 1; i < 7; i++) num[i] = char('0' + lcg(seed) % 10);
-    num[7] = 0;
+    for (int i = 1; i < len; i++) num[i] = char('0' + lcg(seed) % 10);
+    num[len] = 0;
   }
  public:
-  Txt task() const override { return {"Remember the number! (2 seconds)", "Merk dir die Zahl! (2 Sekunden)"}; }
-  Txt hint() const override { return {"Chunk it: 3 + 4 digits, like a phone number. Restart shows a new one.", "In Häppchen merken: 3 + 4 Ziffern, wie eine Telefonnummer. Neustart zeigt eine neue."}; }
+  explicit Memory7(int digits = 7, float show = 2.0f) : len(digits), SHOW(show) {}
+  Txt task() const override {
+    if (len < 7) return {"Remember the number! (3 seconds)", "Merk dir die Zahl! (3 Sekunden)"};
+    return {"Remember the number! (2 seconds)", "Merk dir die Zahl! (2 Sekunden)"};
+  }
+  Txt hint() const override {
+    if (len < 7) return {"Say the digits quietly to yourself. Restart shows a new number.", "Sag die Ziffern leise vor dich hin. Neustart zeigt eine neue Zahl."};
+    return {"Chunk it: 3 + 4 digits, like a phone number. Restart shows a new one.", "In Häppchen merken: 3 + 4 Ziffern, wie eine Telefonnummer. Neustart zeigt eine neue."};
+  }
   int tools() const override { return TOOL_THINK; }
   const char* answer() const override { return num; }
   void reset() override { win.reset(); pad.clear(); lock.reset(); phase0 = 0.4f; fresh(); }
@@ -945,7 +1006,7 @@ class Memory7 : public Level {
     if (win.on() || f.t - phase0 < SHOW) return;
     if (pad.tick(f, h, lock.on(f))) {
       if (pad.is(num)) { win.start(f); h.sfx(SFX_WIN); }
-      else { lock.fail(f); pad.wrong(f); h.nope(CX, NP_DY - 30); fresh(); phase0 = lock.until; }
+      else { lock.fail(f, kids); pad.wrong(f); h.nope(CX, NP_DY - 30); fresh(); phase0 = lock.until; }
     }
   }
   void draw(Scene& s, const Frame& f, int) override {
@@ -957,7 +1018,8 @@ class Memory7 : public Level {
       return;
     }
     s.rrect(CX - 140, 120, 280, 76, 20, win.on() ? CYAN : BTN);
-    s.text(fonts::huge, win.on() ? num : "???????", CX, 132, win.on() ? INK : G3, 1, Align::Center);
+    static const char Q[] = "???????";
+    s.text(fonts::huge, win.on() ? num : Q + 7 - len, CX, 132, win.on() ? INK : G3, 1, Align::Center);
     pad.draw(s, f, lock, win.on());
   }
 };
@@ -1041,14 +1103,19 @@ class Simon : public Level {
   float phase0 = 0, litT[4] = {-10, -10, -10, -10};
   uint32_t seed = 0xBEEF;
   char ans[8] = {};
-  static constexpr int N = 7;
-  static constexpr float STEP = 0.6f, ON = 0.4f, PW = 100, PH = 80;
+  const int N;            // Erwachsene 7 Farben, Kinder 4 (und langsamer)
+  const float STEP, ON;
+  static constexpr float PW = 100, PH = 80;
   static Col color(int i) { static const Col C[4] = {CYAN, YELLOW, HOTPINK, MINT}; return C[i]; }
   static void pad(int i, float& x, float& y) { x = i % 2 ? CX + 4 : CX - 104; y = i / 2 ? 216 : 130; }
   bool playing(const Frame& f) const { return f.t - phase0 < N * STEP; }
  public:
+  explicit Simon(int n = 7) : N(n), STEP(n < 7 ? 0.85f : 0.6f), ON(n < 7 ? 0.6f : 0.4f) {}
   Txt task() const override { return {"Watch, then repeat the color sequence", "Schau zu und tippe die Farbfolge nach"}; }
-  Txt hint() const override { return {"7 colors. Name them in your head while watching, e.g. “blue, yellow, pink …”.", "7 Farben. Sprich sie beim Zuschauen im Kopf mit, z. B. „blau, gelb, pink …“."}; }
+  Txt hint() const override {
+    if (N < 7) return {"4 colors. Say them quietly while watching: “blue, yellow …”.", "4 Farben. Sag sie beim Zuschauen leise mit: „blau, gelb …“."};
+    return {"7 colors. Name them in your head while watching, e.g. “blue, yellow, pink …”.", "7 Farben. Sprich sie beim Zuschauen im Kopf mit, z. B. „blau, gelb, pink …“."};
+  }
   int tools() const override { return TOOL_THINK; }
   const char* answer() const override { return ans; }
   void reset() override {
@@ -1070,7 +1137,7 @@ class Simon : public Level {
         if (++pos == N) { win.start(f); h.sfx(SFX_WIN); }
       } else {
         h.nope(CX, 100);
-        lock.fail(f);
+        lock.fail(f, kids);
         pos = 0;
         phase0 = lock.until + 0.4f;
       }
@@ -1089,7 +1156,7 @@ class Simon : public Level {
     }
     char b[32];
     if (lock.on(f)) std::snprintf(b, sizeof b, "%d s", int(std::ceil(lock.left(f))));
-    else if (win.on()) std::snprintf(b, sizeof b, "7/7");
+    else if (win.on()) std::snprintf(b, sizeof b, "%d/%d", N, N);
     else if (f.t < phase0 || playing(f)) std::snprintf(b, sizeof b, "%s", lang ? "Schau zu …" : "Watch …");
     else std::snprintf(b, sizeof b, "%s  %d/%d", lang ? "Du bist dran" : "Your turn", pos, N);
     s.text(fonts::heavy, b, CX, 306, lock.on(f) ? G4 : INK, 1, Align::Center);
@@ -1106,16 +1173,21 @@ class Maze : public Level {
   static constexpr float SX = 44, SY = 132, GX = 44, GY = 312;
   struct Box { float x0, y0, x1, y1; };
   static constexpr Box WALL{X0, 160, 296, 290};
-  static constexpr float HOLES[4][2] = {{170, 118}, {240, 148}, {322, 226}, {150, 330}};
+  static constexpr float HOLES[4][2] = {{240, 148}, {150, 330}, {170, 118}, {322, 226}};   // Kinder: nur die ersten zwei
   static constexpr float HR = 12;
+  const int nHoles;
   static bool hitBox(float x, float y, const Box& b) {
     const float cx = clampf(x, b.x0, b.x1), cy = clampf(y, b.y0, b.y1);
     return (x - cx) * (x - cx) + (y - cy) * (y - cy) < R * R;
   }
   static bool blocked(float x, float y) { return x < X0 + R || x > X1 - R || y < Y0 + R || y > Y1 - R || hitBox(x, y, WALL); }
  public:
+  explicit Maze(int holes = 4) : nHoles(holes) {}
   Txt task() const override { return {"Roll the ball into the goal", "Roll die Kugel ins Ziel"}; }
-  Txt hint() const override { return {"Tilt the whole device – gently. In the last corridor, keep the ball close to the upper wall.", "Kipp das ganze Gerät – ganz sanft. Im letzten Gang die Kugel oben an der Wand halten."}; }
+  Txt hint() const override {
+    if (nHoles < 4) return {"Tilt the whole device – very gently – and roll around the holes.", "Kipp das ganze Gerät – ganz sanft – und roll um die Löcher herum."};
+    return {"Tilt the whole device – gently. In the last corridor, keep the ball close to the upper wall.", "Kipp das ganze Gerät – ganz sanft. Im letzten Gang die Kugel oben an der Wand halten."};
+  }
   int tools() const override { return TOOL_TILT; }
   void reset() override { bx = SX; by = SY; vx = vy = 0; falls = 0; fallT = -10; win.reset(); }
   void tick(const Frame& f, Host& h) override {
@@ -1131,8 +1203,8 @@ class Maze : public Level {
       if (sp > 520) { vx *= 520 / sp; vy *= 520 / sp; }
       if (!blocked(bx + vx * dt, by)) bx += vx * dt; else vx *= -0.25f;
       if (!blocked(bx, by + vy * dt)) by += vy * dt; else vy *= -0.25f;
-      for (auto& hole : HOLES)
-        if (dist(bx, by, hole[0], hole[1]) < HR) {
+      for (int k = 0; k < nHoles; k++)
+        if (const float* hole = HOLES[k]; dist(bx, by, hole[0], hole[1]) < HR) {
           falls++; fallT = f.t;
           h.sfx(SFX_NOPE);
           h.say(hole[0], hole[1] - 30, {"Plop!", "Plumps!"});
@@ -1147,7 +1219,7 @@ class Maze : public Level {
     s.rrect(X0, Y0, X1 - X0, Y1 - Y0, 10, hex(0xF6F1E8));
     s.rrect(WALL.x0, WALL.y0, WALL.x1 - WALL.x0, WALL.y1 - WALL.y0, 8, G4);
     s.rrect(WALL.x0 + 4, WALL.y0 + 4, WALL.x1 - WALL.x0 - 8, WALL.y1 - WALL.y0 - 8, 6, G3);
-    for (auto& hole : HOLES) { s.circle(hole[0], hole[1], HR + 2, G4); s.circle(hole[0], hole[1], HR, G6); }
+    for (int k = 0; k < nHoles; k++) { s.circle(HOLES[k][0], HOLES[k][1], HR + 2, G4); s.circle(HOLES[k][0], HOLES[k][1], HR, G6); }
     s.circle(GX, GY, 17, win.on() ? CYAN : YELLOW);
     s.circle(GX, GY, 12, G6);
     if (!win.on()) {
@@ -1202,6 +1274,28 @@ Level* makeLevel(int i) {
     case 34: return new Quiz(Q_LETTERS);
     default: return new Quiz(Q_LOOKSAY);
   }
+}
+
+// Kinder: die zwölf Trick-Level, dann leichte Denkfallen und Spiele; falsche Antworten sperren nur kurz
+Level* makeKidLevel(int i) {
+  Level* l;
+  switch (i) {
+    case 12: l = new Quiz(K_SHEEP); break;
+    case 13: l = new Quiz(K_FEATHERS); break;
+    case 14: l = new Memory7(4, 3.0f); break;
+    case 15: l = new Quiz(K_LEGS); break;
+    case 16: l = new Quiz(K_RACE); break;
+    case 17: l = new Quiz(K_SERIES); break;
+    case 18: l = new Simon(4); break;
+    case 19: l = new Quiz(K_EGGS); break;
+    case 20: l = new Quiz(K_TOWEL); break;
+    case 21: l = new Maze(2); break;
+    case 22: l = new Quiz(K_MONTHS); break;
+    case 23: l = new Quiz(K_TOM); break;
+    default: l = makeLevel(i); break;
+  }
+  l->kids = true;
+  return l;
 }
 
 }  // namespace bc
