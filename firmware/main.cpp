@@ -11,7 +11,8 @@
 //   klopf N        N künstliche Schläge auf den Tisch
 //   stufe N        Schwierigkeit 0 leicht, 1 normal, 2 schwer
 //   laut N         Lautstärke 0 (stumm) bis 3
-//   modus kind     Kinder-Level (24), „modus erwachsen“: Erwachsenen-Level (36)
+//   modus X        X = klein (16 Level, unter 5), kind (24 Level, 6–9) oder erwachsen (36 Level)
+//   menu           Einstellungen öffnen
 //   sag KEY        Sprach-Clip abspielen, z. B. „sag de_t05“
 //   reset          Spielstand löschen (Level, Tipps)
 //   log            Zwei-Sekunden-Protokoll (fps, Zeiten) ein/aus
@@ -121,22 +122,30 @@ static volatile int brightness = 0, curBrightness = -1;
 static volatile bool panelWant = true;   // false: Panel per Taste ausgeschaltet
 static bool panelIs = true;
 
+// Nur Bänder, die sich seit dem letzten Bild geändert haben, gehen zum Panel (jedes mit eigenem Fenster).
+// Das Panel hat keinen TE-Ausgang; ein ständig neu geschriebenes Vollbild flackerte beim Auslesen.
 static void displayTask(void*) {
   auto* gfx = hw::panel();
   for (;;) {
     Band b;
     xQueueReceive(fullQ, &b, portMAX_DELAY);
-    if (b.y == 0 || !b.buf) {
-      if (panelIs != panelWant) { panelIs = panelWant; if (panelIs) gfx->displayOn(); else gfx->displayOff(); }
-      if (curBrightness != brightness) { curBrightness = brightness; gfx->setBrightness(curBrightness); }
-      if (!b.buf) continue;   // nur Helligkeit setzen
-      gfx->startWrite();
-      gfx->writeAddrWindow(0, hw::OFF_Y, PW, hw::LCD_H);
-    }
+    if (panelIs != panelWant) { panelIs = panelWant; if (panelIs) gfx->displayOn(); else gfx->displayOff(); }
+    if (curBrightness != brightness) { curBrightness = brightness; gfx->setBrightness(curBrightness); }
+    if (!b.buf) continue;   // nur Helligkeit setzen
+    gfx->startWrite();
+    gfx->writeAddrWindow(0, hw::OFF_Y + b.y, PW, BAND);
     hw::bus()->writeBytes(reinterpret_cast<uint8_t*>(b.buf), PW * BAND * 2);
-    if (b.y + BAND >= H) gfx->endWrite();
+    gfx->endWrite();
     xQueueSend(freeQ, &b.buf, portMAX_DELAY);
   }
+}
+
+static uint32_t bandHash[H / BAND];   // 0 = unbekannt, Band wird auf jeden Fall gesendet
+static uint32_t hashBand(const uint16_t* p, int n) {
+  uint32_t h = 2166136261u;
+  const uint32_t* w = reinterpret_cast<const uint32_t*>(p);
+  for (int i = 0; i < n / 2; i++) h = (h ^ w[i]) * 16777619u;
+  return h | 1;
 }
 
 // ---------------- Audio und Mikrofonpegel (Kern 0) ----------------
@@ -211,9 +220,13 @@ static void pollSerial() {
       game->setVol(a);
       Serial.printf("laut %d (0 stumm … 3 laut)\n", game->volume());
     } else if (!strncmp(line, "modus ", 6)) {
-      game->setMode(!strcmp(line + 6, "kind"));
+      const char* m = line + 6;
+      game->setMode(!strcmp(m, "kind") ? bc::Game::KID : !strcmp(m, "klein") ? bc::Game::SMALL : bc::Game::ADULT);
       game->skipWho();
-      Serial.printf("modus %s\n", game->kids() ? "kind" : "erwachsen");
+      static const char* const N[3] = {"erwachsen", "kind", "klein"};
+      Serial.printf("modus %s\n", N[game->mode()]);
+    } else if (!strcmp(line, "menu")) {
+      game->openSettings();
     } else if (!strncmp(line, "sag ", 4)) {
       speaker.speak(line + 4);
     } else if (!strcmp(line, "reset")) {
@@ -264,14 +277,17 @@ void loop() {
   // Tasten: Display aus/an (Spiel pausiert, Touch wird ignoriert) und Ausschalten
   static bool forcedOff = false;
   const int be = buttonEvent;
-  if (be) {
+  const bool menuOff = game->takePowerOff();   // Ausschalten aus dem Einstellungsmenü
+  if (be || menuOff) {
     buttonEvent = 0;
-    if (be == int(hw::Button::ScreenToggle)) {
+    const int ev = menuOff ? int(hw::Button::PowerOff) : be;
+    if (ev == int(hw::Button::ScreenToggle)) {
       forcedOff = !forcedOff;
       panelWant = !forcedOff;
-      if (!forcedOff) game->wake(millis());
+      if (!forcedOff) { game->wake(millis()); memset(bandHash, 0, sizeof bandHash); }
       Serial.printf("display %s\n", forcedOff ? "aus" : "an");
-    } else if (be == int(hw::Button::PowerOff)) {
+    }
+    if (ev == int(hw::Button::PowerOff)) {
       Serial.println("ausschalten");
       brightness = 0;
       panelWant = false;
@@ -330,7 +346,7 @@ void loop() {
 
   brightness = game->brightness();
   if (game->screenOff()) {
-    if (!blank) { scene.reset(); scene.bg = {0, 0, 0}; blank = true; }
+    if (!blank) { scene.reset(); scene.bg = {0, 0, 0}; blank = true; memset(bandHash, 0, sizeof bandHash); }
     else {
       Band b{nullptr, 0};
       xQueueSend(fullQ, &b, portMAX_DELAY);
@@ -341,13 +357,21 @@ void loop() {
   for (int y = 0; y < H; y += BAND) {
     uint16_t* buf;
     xQueueReceive(freeQ, &buf, portMAX_DELAY);
-    if (hw::OFF_X == 0) scene.rasterize(buf, y, BAND, true);   // Panel erwartet Big Endian
+    uint32_t h;
+    if (hw::OFF_X == 0) { scene.rasterize(buf, y, BAND, true); h = hashBand(buf, W * BAND); }   // Panel erwartet Big Endian
     else {
       static uint16_t narrow[W * BAND];
       scene.rasterize(narrow, y, BAND, true);
-      for (int r = 0; r < BAND; r++) memcpy(buf + r * PW + hw::OFF_X, narrow + r * W, W * 2);
+      h = hashBand(narrow, W * BAND);
+      if (h != bandHash[y / BAND]) for (int r = 0; r < BAND; r++) memcpy(buf + r * PW + hw::OFF_X, narrow + r * W, W * 2);
     }
+    if (h == bandHash[y / BAND]) { xQueueSend(freeQ, &buf, portMAX_DELAY); continue; }   // unverändert: nicht senden
+    bandHash[y / BAND] = h;
     Band b{buf, int16_t(y)};
+    xQueueSend(fullQ, &b, portMAX_DELAY);
+  }
+  {   // Helligkeit auch ohne geänderte Bänder nachführen
+    Band b{nullptr, 0};
     xQueueSend(fullQ, &b, portMAX_DELAY);
   }
   rasterUs += micros() - t1;

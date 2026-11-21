@@ -85,6 +85,8 @@ constexpr int LEVELS = 36;       // Erwachsene
 constexpr int KID_LEVELS = 24;   // Kinder
 Level* makeLevel(int i);      // 0 .. LEVELS-1
 Level* makeKidLevel(int i);   // 0 .. KID_LEVELS-1 (0–11 wie bei den Erwachsenen)
+constexpr int SMALL_LEVELS = 16;   // Kleine (unter 5)
+Level* makeSmallLevel(int i);
 
 // ---------------- Layout ----------------
 constexpr float HEAD_Y = 40;       // Mitte der Kopfzeile („<  LVL.3  >>“)

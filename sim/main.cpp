@@ -153,7 +153,7 @@ static int tour(const char* dir) {
     printf("== Sprache %s ==\n", lang ? "de" : "en");
     sim.wait(1);
     sim.shot("wer_spielt");
-    sim.tap(268, 230);   // Erwachsen
+    sim.tap(299, 230);   // Erwachsen
     sim.wait(0.3f);
     for (int p = 0; p < 3; p++) {   // Intro beim ersten Start: drei Karten
       sim.shot(("intro" + std::to_string(p + 1)).c_str());
@@ -275,10 +275,10 @@ static int tour(const char* dir) {
     sim.tap(90, 259);    // Titelbild: Knopf „Erwachsen“ führt zur Auswahl
     sim.wait(0.3f);
     sim.shot("wer_spielt_wieder");
-    sim.tap(100, 230);   // Kind
+    sim.tap(184, 230);   // Kind
     sim.wait(0.3f);
     sim.shot("kind_titel");
-    if (!sim.game.kids() || sim.game.difficulty() != 0) { printf("Kinder-Modus nicht gewählt\n"); fails++; }
+    if (sim.game.mode() != bc::Game::KID || sim.game.difficulty() != 0) { printf("Kinder-Modus nicht gewählt\n"); fails++; }
     sim.tap(296, 384);
     sim.wait(0.3f);
     sim.shot("kind_levels");
@@ -324,15 +324,71 @@ static int tour(const char* dir) {
     sim.tap(184, 358);
     sim.game.wake(sim.ms);
     sim.wait(0.3f);
-    sim.tap(100, 230);
+    sim.tap(184, 230);
     sim.wait(0.3f);
     if (std::strncmp(sim.game.debug(), "screen 2 modus kind level 13 overlay 0", 38)) { printf("Aufwecken: %s\n", sim.game.debug()); fails++; }
     sim.game.wake(sim.ms);   // anderer Modus: zum Titelbild der Erwachsenen
     sim.wait(0.3f);
-    sim.tap(268, 230);
+    sim.tap(299, 230);
     sim.wait(0.3f);
     if (std::strncmp(sim.game.debug(), "screen 0 modus erwachsen", 24)) { printf("Moduswechsel: %s\n", sim.game.debug()); fails++; }
     sim.shot("titel_erwachsen");
+
+    // ---- Kleine (unter 5) ----
+    sim.tap(90, 259);
+    sim.wait(0.3f);
+    sim.tap(69, 230);
+    sim.wait(0.3f);
+    if (sim.game.mode() != bc::Game::SMALL) { printf("Klein-Modus nicht gewählt\n"); fails++; }
+    sim.shot("klein_titel");
+    static const Fn SSOLVE[bc::SMALL_LEVELS] = {
+        [](Sim& s) { s.drag(84, 318, 228, 236, 0.8f); },                                   // Bonbon ins Maul
+        [](Sim& s) { s.tap(110, 160); s.wait(0.5f); s.tap(258, 160); },                    // erst blau (falsch), dann gelb
+        [](Sim& s) { s.imu.shaking = true; s.wait(1.2f); s.imu.shaking = false; },          // schütteln
+        [](Sim& s) { s.tap(184 - 64 * 2 + 29 + 64, 297); s.wait(0.4f); s.tap(184 - 64 * 2 + 29 + 128, 297); },   // 2 (falsch), 3
+        [](Sim& s) { s.tap(262, 290); s.wait(0.4f); s.tap(110, 270); },                    // klein (falsch), groß
+        [](Sim& s) { s.drag(62, 146, 236, 200, 0.8f); s.wait(1.5f); },                      // Sonne
+        [](Sim& s) { s.voice = 0.8f; s.wait(1.4f); s.voice = 0; },                          // pusten
+        [](Sim& s) { s.tap(72, 220); s.wait(0.4f); s.tap(296, 220); },                      // Kreis: Platz 2 bei want 0
+        [](Sim& s) { s.hold(184, 236, 4.4f); },                                             // Finger aufs Ei
+        [](Sim& s) { s.tap(184 + 64, 297); },                                               // 4 Mäuse
+        [](Sim& s) { s.voice = 0.8f; s.wait(0.8f); s.voice = 0; },                          // rufen
+        [](Sim& s) { s.tap(258, 160); },                                                    // rot
+        [](Sim& s) { s.circle(184, 232, 86, 1.6f); },                                       // Ring
+        [](Sim& s) { s.tap(110, 270); s.wait(0.4f); s.tap(262, 290); },                     // große Maus (falsch), kleine
+        [](Sim& s) { s.tap(184, 220); },                                                    // Dreieck in der Mitte
+        [](Sim& s) { s.drag(184, 180, 184, 290, 0.6f); },                                   // Fledermaus unter den Ast
+    };
+    for (int i = 0; i < bc::SMALL_LEVELS; i++) {
+      sim.game.startLevel(i);
+      sim.wait(0.6f);
+      sim.shot(("klein" + std::to_string(i + 1) + "_start").c_str());
+      SSOLVE[i](sim);
+      sim.wait(0.15f);
+      sim.shot(("klein" + std::to_string(i + 1) + "_aktion").c_str());
+      sim.wait(1.6f);
+      const bool ok = (sim.game.doneMask() >> i) & 1;
+      printf("Klein %2d: %s\n", i + 1, ok ? "gelöst" : "NICHT GELÖST");
+      if (!ok) fails++;
+    }
+    sim.game.enterLevel(3);
+    sim.wait(0.6f);
+    sim.shot("klein_karte");
+    sim.tap(184, 358);
+
+    // ---- Einstellungen: von oben wischen ----
+    sim.drag(184, 10, 184, 200, 0.4f);
+    sim.wait(0.3f);
+    sim.shot("einstellungen");
+    sim.tap(311, 64 + 22);   // heller
+    sim.tap(203, 114 + 22);  // leiser
+    sim.tap(40, 264 + 22);   // alles auf 0: erst nachfragen …
+    sim.wait(0.2f);
+    sim.shot("einstellungen_nachfrage");
+    sim.tap(40, 264 + 22);   // … dann wirklich
+    sim.wait(0.3f);
+    if (std::strncmp(sim.game.debug(), "screen 5", 8) || sim.game.doneMask() != 0) { printf("Zurücksetzen: %s\n", sim.game.debug()); fails++; }
+    if (sim.game.brightLevel() != 3) { printf("Helligkeit: %d\n", sim.game.brightLevel()); fails++; }
   }
   printf("%d Level nicht gelöst, %d Textprobleme\n", fails, nIssues);
   return fails || nIssues ? 1 : 0;

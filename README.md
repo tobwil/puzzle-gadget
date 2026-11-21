@@ -51,11 +51,32 @@ Englisch und Deutsch lassen sich auf dem Titelbild umschalten (EN/DE):
 | 35 | Buchstaben der Antwort auf diese Frage | 4 („vier“) |
 | 36 | 1, 11, 21, 1211, 111221, ? | 312211 |
 
-## Kinder-Modus
+## Wer spielt? Drei Altersstufen
 
-Bei jedem Start fragt das Gerät „Wer spielt?“: **Kind** oder **Erwachsen** (änderbar über den Knopf unter der Schwierigkeit auf dem Titelbild). Beide Modi haben eigenen Spielstand, eigene Tipps und eigene Schwierigkeit; Kinder starten auf „Leicht“. Falsche Antworten sperren bei Kindern nur kurz (2 s, 3 s … höchstens 5 s).
+Bei jedem Start und nach jedem Aufwecken fragt das Gerät „Wer spielt?“ (wird vorgelesen): **Klein** (3–5 Jahre, 16 Level), **Kind** (6–9 Jahre, 24 Level) oder **Erwachsen** (36 Level). Wer denselben Modus wählt, spielt dort weiter, wo er war. Jeder Modus hat eigenen Spielstand, eigene Tipps und eigene Schwierigkeit; Klein und Kind starten auf „Leicht“. Falsche Antworten sperren Kinder nur kurz (2 s, 3 s … höchstens 5 s), die Kleinen gar nicht.
 
-Die 24 Kinder-Level: 1–12 sind dieselben Trickrätsel wie oben, dann:
+**Klein (unter 5):** jede Aufgabe ist ganz direkt formuliert und wird vorgelesen, die Tipps auch. Keine Zahlentastatur, große Ziele, bei falschem Tippen sagt das Gerät, was es war („Das ist blau!“).
+
+| LVL | Aufgabe |
+|---|---|
+| 1 | Gib dem Dino das Bonbon (schon ausgepackt) |
+| 2 | Tippe auf das gelbe Bonbon |
+| 3 | Schüttel das Gerät, dann wacht die Eule auf |
+| 4 | Wie viele Bonbons? (3, Knöpfe 1–5) |
+| 5 | Tippe auf den großen Elefanten |
+| 6 | Schieb die Sonne zum Dino |
+| 7 | Puste die Kerzen aus |
+| 8 | Wo ist der Kreis? |
+| 9 | Leg deinen Finger auf das Ei und warte (3,5 s) |
+| 10 | Wie viele Mäuse? (4) |
+| 11 | Ruf den Hund – ganz laut (oder klopfen) |
+| 12 | Tippe auf das rote Bonbon |
+| 13 | Fahr mit dem Finger rund um den Ring |
+| 14 | Tippe auf die kleine Maus |
+| 15 | Wo ist das Dreieck? |
+| 16 | Häng die Fledermaus unten an den Ast |
+
+**Kind (6–9):** Level 1–12 sind die Trickrätsel von oben, dann:
 
 | LVL | Aufgabe | Lösung (Spoiler) |
 |---|---|---|
@@ -72,7 +93,9 @@ Die 24 Kinder-Level: 1–12 sind dieselben Trickrätsel wie oben, dann:
 | 23 | Wie viele Monate haben 28 Tage? | 12 |
 | 24 | Toms Mutter hat drei Kinder: Mia, Leo und …? | TOM |
 
-Nach dem Aufwecken (Power kurz, Taste an GPIO18 oder Tippen nach dem automatischen Abschalten) fragt das Gerät wieder, wer spielt. Wer denselben Modus wählt, spielt dort weiter, wo er war.
+## Einstellungen
+
+Von oben nach unten wischen (überall, auch im Level) öffnet die Einstellungen: Helligkeit (4 Stufen), Lautstärke, Sprache, Wer spielt?, **Alles auf 0 zurücksetzen** (alle drei Modi, Intro von vorn) und **Ausschalten**. Die letzten beiden fragen nach („Wirklich? Nochmal tippen!“). Schließen mit FERTIG oder nach oben wischen.
 
 Neue Sätze nachsprechen lassen, ohne die vorhandenen Clips zu ändern: `HEYGEN_API_KEY=… python3 tools/mkvoice.py --fehlende`.
 
@@ -115,6 +138,8 @@ Für das **Waveshare ESP32-S3-Touch-AMOLED-2.16** (480×480, Touch CST9220, Mikr
 pio run -e amoled216 -t upload
 ```
 
+Zum Display gehen nur die 16-Pixel-Bänder, die sich seit dem letzten Bild geändert haben (das Panel hat keinen TE-Ausgang; ein ständig neu geschriebenes Vollbild flackerte).
+
 Die Partitionstabelle `partitions.csv` hat eine große App (12,5 MB) statt zwei OTA-Hälften, weil die Sprach-Clips eingebettet sind.
 
 Die Plattform ist auf pioarduino `55.03.313` (Arduino-Core 3.3) festgelegt. Die aktuelle „stable“ bringt Core 4.0 mit, damit kompiliert GFX Library 1.6.8 nicht mehr.
@@ -124,10 +149,11 @@ Serielle Befehle (115200 Baud, `pio device monitor`):
 | Befehl | Wirkung |
 |---|---|
 | `status` | Bildschirm, Level, gelöste Level, Tipps, Neigung, Mikrofonpegel |
-| `level N` | Level N (1–36, Kinder 1–24) starten |
+| `level N` | Level N starten (Erwachsen 1–36, Kind 1–24, Klein 1–16) |
 | `stufe N` | Schwierigkeit: 0 leicht, 1 normal, 2 schwer |
 | `laut N` | Lautstärke 0 (stumm) bis 3 |
-| `modus kind`, `modus erwachsen` | Kinder- bzw. Erwachsenen-Level |
+| `modus klein`, `modus kind`, `modus erwachsen` | Altersstufe wählen |
+| `menu` | Einstellungen öffnen |
 | `sag KEY` | Sprach-Clip abspielen, z. B. `sag de_t05` |
 | `tipp X Y`, `wisch X0 Y0 X1 Y1` | Berührung nachstellen |
 | `klopf N` | N Schläge auf den Tisch nachstellen |

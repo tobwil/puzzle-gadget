@@ -13,7 +13,8 @@ enum Btn { B_BACK, B_SKIP, B_RESTART, B_HINT, B_PLAY = 10, B_GRID, B_LANG, B_SOU
 constexpr float VOLS[4] = {0, 0.25f, 0.55f, 1.0f};
 
 constexpr uint32_t DIM_MS = 90000, OFF_MS = 240000;
-constexpr int BRIGHT = 170, BRIGHT_DIM = 40;
+constexpr int BRIGHT_DIM = 40;
+constexpr int BRIGHTS[4] = {50, 100, 170, 255};   // Helligkeitsstufen im Menü
 
 // Kacheln der Levelauswahl
 constexpr float TW = 92, TH = 62, TGX = 14, TGY = 12, TX0 = (W - 3 * TW - 2 * TGX) / 2, TY0 = 86;
@@ -38,17 +39,23 @@ const IntroPage INTRO_PAGES[3] = {
      {"Drag, tap and hold – but also shake, tilt, turn it over, blow at it or knock on the table.",
       "Ziehen, tippen, halten – aber auch schütteln, kippen, umdrehen, anpusten oder auf den Tisch klopfen."}},
     {{"Stuck?", "Hängst du fest?"},
-     {"The bulb shows a hint, >> skips a level. Choose the difficulty on the title screen.",
-      "Die Glühbirne zeigt einen Tipp, mit >> überspringst du ein Level. Die Schwierigkeit wählst du auf dem Titelbild."}},
+     {"The bulb shows a hint, >> skips a level. Swipe down from the top for settings.",
+      "Die Glühbirne zeigt einen Tipp, mit >> überspringst du ein Level. Von oben nach unten wischen öffnet die Einstellungen."}},
 };
 const Txt T_YES{"YES", "JA"}, T_NO{"NO", "NEIN"}, T_OK{"OK", "OK"};
 const Txt T_SOLVED{"Level solved!", "Level geschafft!"}, T_PLUS{"+1 hint", "+1 Tipp"}, T_NEXT{"NEXT", "WEITER"};
 const Txt T_GENIUS{"GENIUS!", "GENIAL!"}, T_ALL{"All %d puzzles solved.", "Alle %d Rätsel gelöst."}, T_BACKTAP{"Tap to go back", "Tippen zum Start"};
-const Txt T_WHO{"WHO IS PLAYING?", "WER SPIELT?"}, T_KID{"CHILD", "KIND"}, T_ADULT{"ADULT", "ERWACHSEN"};
-const Txt T_KIDSUB{"easier puzzles", "leichtere Rätsel"}, T_ADULTSUB{"hard puzzles", "schwere Rätsel"};
-const Txt T_WHOLATER{"You can change this on the title screen.", "Das kannst du auf dem Titelbild ändern."};
-const Txt T_MODE[2] = {{"Adult", "Erwachsen"}, {"Child", "Kind"}};
-const Txt T_WHOSAY{"Who is playing? A child or an adult?", "Wer spielt? Ein Kind oder ein Erwachsener?"};
+const Txt T_WHO{"WHO IS PLAYING?", "WER SPIELT?"};
+const Txt T_MODENAME[3] = {{"ADULT", "ERWACHSEN"}, {"CHILD", "KIND"}, {"LITTLE", "KLEIN"}};
+const Txt T_AGE[3] = {{"10 and up", "ab 10 Jahre"}, {"age 6–9", "6–9 Jahre"}, {"age 3–5", "3–5 Jahre"}};
+const Txt T_WHOLATER{"Swipe down from the top for settings.", "Von oben nach unten wischen: Einstellungen."};
+const Txt T_MODE[3] = {{"Adult", "Erwachsen"}, {"Child", "Kind"}, {"Little", "Klein"}};
+const Txt T_WHOSAY{"Who is playing? A little one, a child or an adult?", "Wer spielt? Ein kleines Kind, ein Schulkind oder ein Erwachsener?"};
+const Txt T_SET{"SETTINGS", "EINSTELLUNGEN"}, T_BRIGHT{"Brightness", "Helligkeit"}, T_VOL{"Volume", "Lautstärke"}, T_LANGROW{"Language", "Sprache"};
+const Txt T_WHOROW{"Who is playing?", "Wer spielt?"}, T_RESETALL{"Reset everything to 0", "Alles auf 0 zurücksetzen"}, T_POWER{"Power off", "Ausschalten"};
+const Txt T_SURE{"Sure? Tap again!", "Wirklich? Nochmal tippen!"}, T_DONE{"DONE", "FERTIG"};
+// Einstellungen: Zeilen
+constexpr float SR_Y = 64, SR_H = 44, SR_STEP = 50;
 const char* const PRAISE[2][5] = {{"NICE!", "BRAVO!", "WOW!", "SMART!", "GENIUS!"}, {"STARK!", "BRAVO!", "WOW!", "SUPER!", "GENIAL!"}};
 const Txt NOPES[] = {{"Nope!", "Nö!"}, {"Hmm… no.", "Hmm… nein."}, {"Not quite!", "Nicht ganz!"}, {"Try again!", "Nochmal!"}};
 
@@ -67,7 +74,8 @@ Game::Game(dk::Synth& synth, dk::Store& store) : synth_(synth), store_(store) {
     store_.set("bc_intro", 0);
     store_.set("bc_ver", 3);
   }
-  kids_ = store_.get("bc_kids", 0) != 0;
+  mode_ = store_.get("bc_mode", store_.get("bc_kids", 0) ? KID : ADULT) % 3;
+  brightIdx_ = store_.get("bc_bright", 2) & 3;
   loadProgress();
   screen_ = WHO;   // bei jedem Start: Wer spielt?
   motion.threshold = 0.12f;
@@ -76,25 +84,26 @@ Game::Game(dk::Synth& synth, dk::Store& store) : synth_(synth), store_(store) {
 Game::~Game() { for (auto* l : levels_) delete l; }
 
 const char* Game::key(const char* name) const {
-  std::snprintf(key_, sizeof key_, "%s_%s", kids_ ? "bk" : "bc", name);
+  static const char* const PRE[3] = {"bc", "bk", "bs"};
+  std::snprintf(key_, sizeof key_, "%s_%s", PRE[mode_], name);
   return key_;
 }
 
 void Game::loadProgress() {
   for (auto*& l : levels_) { delete l; l = nullptr; }
-  for (int i = 0; i < levelCount(); i++) levels_[i] = kids_ ? makeKidLevel(i) : makeLevel(i);
+  for (int i = 0; i < levelCount(); i++) levels_[i] = mode_ == KID ? makeKidLevel(i) : mode_ == SMALL ? makeSmallLevel(i) : makeLevel(i);
   const uint32_t d0 = store_.get(key("done"), 0), d1 = store_.get(key("done2"), 0);
   const uint32_t u0 = store_.get(key("used"), 0), u1 = store_.get(key("used2"), 0);
   done_ = d0 | uint64_t(d1) << 32;
   hintUsed_ = u0 | uint64_t(u1) << 32;
   hints_ = store_.get(key("hints"), 15);
-  diff_ = store_.get(key("diff"), kids_ ? 0 : 1) % 3;   // Kinder starten auf „Leicht“
+  diff_ = store_.get(key("diff"), mode_ == ADULT ? 1 : 0) % 3;   // Kinder starten auf „Leicht“
   cur_ = store_.get(key("cur"), 0) % levelCount();
 }
 
-void Game::setMode(bool kids) {
-  kids_ = kids;
-  store_.set("bc_kids", kids ? 1 : 0);
+void Game::setMode(int m) {
+  mode_ = (m % 3 + 3) % 3;
+  store_.set("bc_mode", mode_);
   loadProgress();
   overlay_ = NONE;
   pickPage_ = 0;
@@ -106,6 +115,38 @@ void Game::askWho() {
   whoBackOverlay_ = overlay_;
   overlay_ = NONE;
   screen_ = WHO;
+  whoSpoken_ = false;
+}
+
+void Game::showHint() {
+  overlay_ = HINT;
+  overlayT_ = 0;
+  sfx(SFX_HINT);
+  if (mode_ == SMALL && hintUsed(cur_)) {
+    char k[8];
+    std::snprintf(k, sizeof k, "h%02d", cur_ + 1);
+    speak(k);
+  }
+}
+
+void Game::openSettings() {
+  if (overlay_ == SETTINGS) return;
+  settingsBack_ = overlay_;
+  overlay_ = SETTINGS;
+  overlayT_ = 0;
+  confirm_ = -1;
+  sfx(SFX_WHOOSH);
+}
+
+void Game::resetAll() {
+  const int m = mode_;
+  for (int k = 0; k < 3; k++) { mode_ = k; resetProgress(); store_.set(key("diff"), k == ADULT ? 1 : 0); }
+  mode_ = m;
+  store_.set("bc_intro", 0);
+  loadProgress();
+  overlay_ = NONE;
+  screen_ = WHO;
+  whoBack_ = -1;
   whoSpoken_ = false;
 }
 
@@ -136,7 +177,8 @@ void Game::enterLevel(int i) {
   overlay_ = TASK;
   overlayT_ = 0;
   char k[8];
-  std::snprintf(k, sizeof k, kids_ && cur_ >= 12 ? "k%02d" : "t%02d", cur_ + 1);   // Kinder 13–24 haben eigene Aufgaben
+  // Kleine haben eigene Aufgaben, Kinder ab Level 13
+  std::snprintf(k, sizeof k, mode_ == SMALL ? "s%02d" : mode_ == KID && cur_ >= 12 ? "k%02d" : "t%02d", cur_ + 1);
   speak(k);
 }
 
@@ -290,7 +332,7 @@ void Game::tick(const dk::Input& in) {
 
   // Energie: nach 90 s dunkler, nach 4 min aus
   if (in.ms - lastActive_ > OFF_MS) off_ = true;
-  bright_ = off_ ? 0 : in.ms - lastActive_ > DIM_MS ? BRIGHT_DIM : BRIGHT;
+  bright_ = off_ ? 0 : in.ms - lastActive_ > DIM_MS ? std::min(BRIGHT_DIM, BRIGHTS[brightIdx_]) : BRIGHTS[brightIdx_];
 
   motion.feed(in.acc, in.nAcc, down_ || released);
   if (motion.shaking || in.voice > 0.4f) lastActive_ = in.ms;
@@ -305,6 +347,17 @@ void Game::tick(const dk::Input& in) {
     if (overlay_ != NONE || screen_ != PLAY) { uiTouch_ = true; pressedBtn_ = 0; }
     else { pressedBtn_ = btnAtPlay(px, py, diff_); uiTouch_ = pressedBtn_ >= 0; }
   }
+  // Von oben nach unten wischen: Einstellungen (der Finger gehört ab da der Oberfläche)
+  if (down_ && !swiped_ && !wake_ && overlay_ != SETTINGS && sy_ < 48 && y_ - sy_ > 70 && std::fabs(x_ - sx_) < y_ - sy_) {
+    swiped_ = uiTouch_ = true;
+    pressedBtn_ = -1;
+    openSettings();
+  }
+  if (released && swiped_) { swiped_ = uiTouch_ = false; pressedBtn_ = -1; }
+  if (released && uiTouch_ && overlay_ == SETTINGS && sy_ - y_ > 80) {   // nach oben wischen schließt
+    overlay_ = Overlay(settingsBack_); overlayT_ = 1; sfx(SFX_CLICK);
+    uiTouch_ = false;
+  }
   if (released && uiTouch_) {
     const float dx = x_ - sx_;
     const bool swipe = !isTap && std::fabs(dx) > 60 && std::fabs(dx) > std::fabs(y_ - sy_);
@@ -315,7 +368,7 @@ void Game::tick(const dk::Input& in) {
     pressedBtn_ = -1;
   }
 
-  if (screen_ == WHO && !whoSpoken_ && speaker) { whoSpoken_ = true; speak("who"); }
+  if (screen_ == WHO && !whoSpoken_ && speaker) { whoSpoken_ = true; speak("who3"); }
   if (screen_ == PLAY && overlay_ != TASK) {
     Level* l = levels_[cur_];
     levelT_ += dt;
@@ -343,7 +396,7 @@ void Game::tick(const dk::Input& in) {
       autoHinted_ = true;
       hintUsed_ |= uint64_t(1) << cur_;
       save();
-      overlay_ = HINT; overlayT_ = 0; sfx(SFX_HINT);
+      showHint();
     }
   }
   frame_ = f;
@@ -354,7 +407,42 @@ void Game::tick(const dk::Input& in) {
   nRemarks_ = k;
 }
 
+void Game::tapSettings(float x, float y) {
+  if (inRect(x, y, 96, 368, 176, 64)) { overlay_ = Overlay(settingsBack_); overlayT_ = 1; sfx(SFX_CLICK); return; }
+  if (y < SR_Y || x < 16 || x > W - 16) return;
+  const int row = int((y - SR_Y) / SR_STEP);
+  if (y > SR_Y + row * SR_STEP + SR_H + 3) return;
+  const bool minus = x < 228, plus = x > 286;
+  switch (row) {
+    case 0:
+      if (minus || plus) { brightIdx_ = std::max(0, std::min(3, brightIdx_ + (plus ? 1 : -1))); store_.set("bc_bright", brightIdx_); sfx(SFX_CLICK); }
+      break;
+    case 1:
+      if (minus || plus) { setVolume(std::max(0, std::min(3, vol_ + (plus ? 1 : -1)))); store_.set("bc_vol", vol_); sfx(SFX_CLICK); }
+      break;
+    case 2:
+      lang_ = x < 232 ? lang_ ^ 1 : x < 286 ? 1 : 0;
+      store_.set("bc_lang", lang_);
+      sfx(SFX_CLICK);
+      break;
+    case 3:
+      overlay_ = Overlay(settingsBack_);
+      askWho();
+      sfx(SFX_CLICK);
+      break;
+    case 4:
+    case 5:
+      if (confirm_ == row && now_ - confirmT_ < 3) {
+        confirm_ = -1;
+        if (row == 4) { resetAll(); sfx(SFX_WHOOSH); }
+        else powerReq_ = true;
+      } else { confirm_ = row; confirmT_ = now_; sfx(SFX_NOPE); }
+      break;
+  }
+}
+
 void Game::tap(float x, float y) {
+  if (overlay_ == SETTINGS) { tapSettings(x, y); return; }
   if (overlay_ == TASK) { if (overlayT_ > 0.3f) { overlay_ = NONE; sfx(SFX_POP); } return; }
   if (overlay_ == HINT) { overlay_ = NONE; sfx(SFX_CLICK); return; }
   if (overlay_ == SKIP) {
@@ -384,14 +472,14 @@ void Game::tap(float x, float y) {
   switch (screen_) {
     case WHO:
       if (inRect(x, y, 280, 8, 80, 56)) { lang_ ^= 1; store_.set("bc_lang", lang_); sfx(SFX_CLICK); }
-      else if (inRect(x, y, 18, 108, 166, 240) || inRect(x, y, 184, 108, 166, 240)) {
-        const bool kid = x < 184;
+      else if (y > 108 && y < 350) {   // links Klein, Mitte Kind, rechts Erwachsen
+        const int m = x < 127 ? SMALL : x < 242 ? KID : ADULT;
         sfx(SFX_POP);
-        if (kid == kids_ && whoBack_ >= 0) {   // gleicher Modus: weiter, wo man war
+        if (m == mode_ && whoBack_ >= 0) {   // gleicher Modus: weiter, wo man war
           screen_ = Screen(whoBack_);
           overlay_ = Overlay(whoBackOverlay_);
         } else {
-          setMode(kid);
+          setMode(m);
           screen_ = store_.get("bc_intro", 0) ? TITLE : INTRO;
         }
         whoBack_ = -1;
@@ -438,7 +526,7 @@ void Game::tap(float x, float y) {
           if (diff_ == 2) { sfx(SFX_NOPE); break; }   // Schwer: keine Tipps
           if (diff_ == 0 && !hintUsed(cur_)) { hintUsed_ |= uint64_t(1) << cur_; save(); }   // Leicht: gratis
           if (!hintUsed(cur_) && hints_ > 0) { hints_--; hintUsed_ |= uint64_t(1) << cur_; save(); }
-          overlay_ = HINT; overlayT_ = 0; sfx(SFX_HINT);
+          showHint();
           break;
       }
       break;
@@ -512,8 +600,9 @@ void Game::drawTitle(Scene& s) {
   s.text(fonts::label, tr(T_DIFF[diff_], lang_), 104, 204, INK, 1, Align::Center);
   // Wer spielt (führt zurück zur Auswahl)
   const bool mDown = down_ && uiTouch_ && inRect(sx_, sy_, 22, 236, 150, 46);
-  s.rrect(30, 242, 126, 34, 17, mDown ? BTN_DOWN : kids_ ? YELLOW : hex(0xE9FDFE));
-  s.text(fonts::label, tr(T_MODE[kids_], lang_), 85, 250, INK, 1, Align::Center);
+  static const Col MC[3] = {hex(0xE9FDFE), YELLOW, PINK};
+  s.rrect(30, 242, 126, 34, 17, mDown ? BTN_DOWN : MC[mode_]);
+  s.text(fonts::label, tr(T_MODE[mode_], lang_), 85, 250, INK, 1, Align::Center);
   // Wechsel-Symbol: zwei Pfeile
   s.capsule(138, 254, 150, 254, 1.6f, INK); s.capsule(146, 250, 150, 254, 1.6f, INK);
   s.capsule(138, 264, 150, 264, 1.6f, INK); s.capsule(138, 264, 142, 268, 1.6f, INK);
@@ -576,7 +665,8 @@ void Game::drawEnd(Scene& s) {
 void Game::drawOverlay(Scene& s) {
   const float a = ease(overlayT_ / 0.2f);
   // Die Aufgabenkarte deckt ganz ab (sonst schimmert z. B. die Merkzahl durch), die anderen lassen das Level ahnen
-  s.rrect(0, 0, W, H, 0, WHITE, overlay_ == TASK ? 1.f : 0.94f * a);
+  s.rrect(0, 0, W, H, 0, WHITE, overlay_ == TASK || overlay_ == SETTINGS ? 1.f : 0.94f * a);
+  if (overlay_ == SETTINGS) { drawSettings(s); return; }
   if (overlay_ == HINT) {
     const bool has = hintUsed(cur_);
     s.circle(W / 2, 130, 42, YELLOW, a);
@@ -682,26 +772,68 @@ void Game::drawWho(Scene& s) {
   const float tw = Scene::textW(fonts::heavy, q);
   s.capsule(W / 2 - tw / 2 - 3, 91, W / 2 + tw / 2 + 3, 89, 8, CYAN);
   s.text(fonts::heavy, q, W / 2, 68, INK, 1, Align::Center);
-  for (int k = 0; k < 2; k++) {   // links Kind, rechts Erwachsen
-    const bool kid = k == 0, cur = kid == kids_;
-    const float x = kid ? 24 : 192, cx = x + 76;
-    const bool down = down_ && uiTouch_ && inRect(sx_, sy_, kid ? 18 : 184, 108, 166, 240);
-    if (cur) s.rrect(x - 3, 113, 158, 232, 25, INK);
-    s.rrect(x, 116, 152, 226, 22, down ? BTN_DOWN : cur ? WHITE : BTN);
-    s.circle(cx, 192, 50, kid ? YELLOW : CYAN);
-    if (kid) drawDino(s, cx + 12, 204, 0.56f, 1);
-    else drawOwl(s, cx, 204, 0.5f, 1, t);
-    const char* name = tr(kid ? T_KID : T_ADULT, lang_);
-    const auto& fnt = Scene::textW(fonts::heavy, name) <= 140 ? fonts::heavy : fonts::body;
-    s.text(fnt, name, cx, &fnt == &fonts::heavy ? 264 : 270, INK, 1, Align::Center);
+  static const int ORDER[3] = {SMALL, KID, ADULT};
+  static const Col BG[3] = {hex(0xE9FDFE), YELLOW, PINK};   // nach Modus
+  for (int k = 0; k < 3; k++) {
+    const int m = ORDER[k];
+    const bool cur = m == mode_;
+    const float x = 16 + k * 115, cx = x + 53;
+    const bool down = down_ && uiTouch_ && sy_ > 108 && sy_ < 350 && sx_ >= x - 5 && sx_ < x + 111;
+    if (cur) s.rrect(x - 3, 113, 112, 236, 22, INK);
+    s.rrect(x, 116, 106, 230, 19, down ? BTN_DOWN : cur ? WHITE : BTN);
+    s.circle(cx, 180, 40, BG[m]);
+    if (m == SMALL) drawMouse(s, cx + 12, 190, 0.62f);
+    else if (m == KID) drawDino(s, cx + 8, 192, 0.4f, 1);
+    else drawOwl(s, cx, 190, 0.38f, 1, t);
+    const char* name = tr(T_MODENAME[m], lang_);
+    const auto& fnt = Scene::textW(fonts::heavy, name) <= 98 ? fonts::heavy : Scene::textW(fonts::body, name) <= 98 ? fonts::body : fonts::label;
+    s.text(fnt, name, cx, &fnt == &fonts::heavy ? 238 : &fnt == &fonts::body ? 244 : 246, INK, 1, Align::Center);
+    s.text(fonts::label, tr(T_AGE[m], lang_), cx, 280, INK, 1, Align::Center);
     char b[24];
-    std::snprintf(b, sizeof b, "%d %s", kid ? KID_LEVELS : LEVELS, lang_ ? "Level" : "levels");
-    s.text(fonts::label, b, cx, 298, INK, 1, Align::Center);
-    s.text(fonts::label, tr(kid ? T_KIDSUB : T_ADULTSUB, lang_), cx, 316, G4, 1, Align::Center);
+    std::snprintf(b, sizeof b, "%d %s", m == SMALL ? SMALL_LEVELS : m == KID ? KID_LEVELS : LEVELS, lang_ ? "Level" : "levels");
+    s.text(fonts::label, b, cx, 304, G4, 1, Align::Center);
   }
-  sparkle(s, 34, 104, 9, INK, 1, t);
-  sparkle(s, 336, 106, 8, CYAN, 1, t + 1);
+  sparkle(s, 44, 56, 9, INK, 1, t);
+  sparkle(s, 326, 70, 8, CYAN, 1, t + 1);
   textWrap(s, fonts::label, tr(T_WHOLATER, lang_), W / 2, 366, 280, G4);
+}
+
+void Game::drawSettings(Scene& s) {
+  const char* ttl = tr(T_SET, lang_);
+  const float tw = Scene::textW(fonts::heavy, ttl);
+  s.capsule(W / 2 - tw / 2 - 3, 43, W / 2 + tw / 2 + 3, 41, 8, CYAN);
+  s.text(fonts::heavy, ttl, W / 2, 20, INK, 1, Align::Center);
+  const bool sure = confirm_ >= 0 && now_ - confirmT_ < 3;
+  static const Txt* const LABEL[6] = {&T_BRIGHT, &T_VOL, &T_LANGROW, &T_WHOROW, &T_RESETALL, &T_POWER};
+  for (int r = 0; r < 6; r++) {
+    const float y = SR_Y + r * SR_STEP;
+    const bool ask = sure && confirm_ == r;
+    s.rrect(20, y, W - 40, SR_H, 14, ask ? HOTPINK : BTN);
+    s.text(fonts::label, tr(ask ? T_SURE : *LABEL[r], lang_), 36, y + 13, ask ? WHITE : r == 4 ? RED : INK);
+    if (r <= 1) {   // – Stufen +
+      const int n = r == 0 ? 4 : 3, v = r == 0 ? brightIdx_ + 1 : vol_;
+      s.rrect(186, y + 5, 34, 34, 10, WHITE);
+      s.capsule(196, y + 22, 210, y + 22, 2, INK);
+      for (int j = 0; j < n; j++) s.rrect(232 + j * 14, y + 30 - 5 - j * 5, 10, 9 + j * 5, 2, j < v ? INK : G3);
+      s.rrect(294, y + 5, 34, 34, 10, WHITE);
+      s.capsule(304, y + 22, 318, y + 22, 2, INK);
+      s.capsule(311, y + 15, 311, y + 29, 2, INK);
+    } else if (r == 2) {
+      s.rrect(234, y + 6, 48, 32, 16, lang_ ? INK : WHITE);
+      s.text(fonts::label, "DE", 258, y + 13, lang_ ? WHITE : INK, 1, Align::Center);
+      s.rrect(288, y + 6, 48, 32, 16, lang_ ? WHITE : INK);
+      s.text(fonts::label, "EN", 312, y + 13, lang_ ? INK : WHITE, 1, Align::Center);
+    } else if (r == 3) {
+      s.text(fonts::label, tr(T_MODE[mode_], lang_), 314, y + 13, G5, 1, Align::Right);
+      s.capsule(320, y + 16, 332, y + 16, 1.6f, INK); s.capsule(328, y + 12, 332, y + 16, 1.6f, INK);
+      s.capsule(320, y + 26, 332, y + 26, 1.6f, INK); s.capsule(320, y + 26, 324, y + 30, 1.6f, INK);
+    } else if (r == 5 && !ask) {   // Power-Symbol
+      s.arc(318, y + 23, 9, 2.2f, 0.6f, TAU - 0.6f, INK);
+      s.capsule(318, y + 11, 318, y + 22, 2.2f, INK);
+    }
+  }
+  s.rrect(W / 2 - 80, 376, 160, 48, 24, INK);
+  s.text(fonts::heavy, tr(T_DONE, lang_), W / 2, 384, WHITE, 1, Align::Center);
 }
 
 void Game::drawIntro(Scene& s) {
@@ -763,6 +895,7 @@ void Game::draw(Scene& s) {
     }
   }
   if (overlay_ != NONE) drawOverlay(s);
+  else s.capsule(W / 2 - 16, 7, W / 2 + 16, 7, 2.5f, G2);   // Griff: hier lässt sich das Menü herunterwischen
 }
 
 void Game::voiceLines(void (*out)(const char* key, const char* text)) {
@@ -781,7 +914,15 @@ void Game::voiceLines(void (*out)(const char* key, const char* text)) {
       out(k, tr(l->task(), lang));
       delete l;
     }
-    std::snprintf(k, sizeof k, "%s_who", L);
+    for (int i = 0; i < SMALL_LEVELS; i++) {   // Kleine: alle eigenen Aufgaben
+      Level* l = makeSmallLevel(i);
+      std::snprintf(k, sizeof k, "%s_s%02d", L, i + 1);
+      out(k, tr(l->task(), lang));
+      std::snprintf(k, sizeof k, "%s_h%02d", L, i + 1);   // Tipps der Kleinen werden vorgelesen
+      out(k, tr(l->hint(), lang));
+      delete l;
+    }
+    std::snprintf(k, sizeof k, "%s_who3", L);
     out(k, tr(T_WHOSAY, lang));
     for (int i = 0; i < 5; i++) { std::snprintf(k, sizeof k, "%s_p%d", L, i); out(k, PRAISE[lang][i]); }
     for (int i = 0; i < 4; i++) { std::snprintf(k, sizeof k, "%s_n%d", L, i); out(k, tr(NOPES[i], lang)); }
@@ -790,7 +931,7 @@ void Game::voiceLines(void (*out)(const char* key, const char* text)) {
 
 const char* Game::debug() {
   std::snprintf(dbg_, sizeof dbg_, "screen %d modus %s level %d overlay %d solved 0x%09llx hints %d lang %s diff %d vol %d tilt %.2f %.2f %.2f",
-                int(screen_), kids_ ? "kind" : "erwachsen", cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_,
+                int(screen_), mode_ == KID ? "kind" : mode_ == SMALL ? "klein" : "erwachsen", cur_ + 1, int(overlay_), (unsigned long long)done_, hints_, lang_ ? "de" : "en", diff_, vol_,
                 motion.tiltX, motion.tiltY, motion.tiltZ);
   return dbg_;
 }

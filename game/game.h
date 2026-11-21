@@ -33,18 +33,23 @@ class Game : Host {
   int difficulty() const { return diff_; }
   void setDifficulty(int d) { diff_ = (d % 3 + 3) % 3; store_.set(key("diff"), diff_); }
   // Wer spielt: Kinder haben eigene Level, eigenen Spielstand und eigene Schwierigkeit
-  bool kids() const { return kids_; }
+  enum Mode { ADULT = 0, KID = 1, SMALL = 2 };   // Erwachsen, Kind (6–9), Klein (unter 5)
+  int mode() const { return mode_; }
   int volume() const { return vol_; }
   void setVol(int v) { setVolume(v); store_.set("bc_vol", vol_); }   // 0 = stumm … 3 = laut
-  void setMode(bool kids);
-  int levelCount() const { return kids_ ? KID_LEVELS : LEVELS; }
+  void setMode(int m);
+  int levelCount() const { return mode_ == KID ? KID_LEVELS : mode_ == SMALL ? SMALL_LEVELS : LEVELS; }
+  void openSettings();   // Einstellungen (auch per Wisch von oben)
+  void resetAll();       // alle drei Modi auf 0, Intro wieder von vorn
+  bool takePowerOff() { const bool p = powerReq_; powerReq_ = false; return p; }   // Ausschalten aus dem Menü (Firmware fragt ab)
+  int brightLevel() const { return brightIdx_; }
   void skipWho() { if (screen_ == WHO) screen_ = store_.get("bc_intro", 0) ? TITLE : INTRO; }
   dk::Motion motion;
   dk::Speaker* speaker = nullptr;
 
  private:
   enum Screen { TITLE, PICK, PLAY, END, INTRO, WHO };
-  enum Overlay { NONE, HINT, SKIP, SOLVED, TASK };
+  enum Overlay { NONE, HINT, SKIP, SOLVED, TASK, SETTINGS };
 
   // Host
   void solve() override;
@@ -61,11 +66,14 @@ class Game : Host {
   void drawOverlay(Scene& s);
   void drawIntro(Scene& s);
   void drawWho(Scene& s);
+  void drawSettings(Scene& s);
+  void tapSettings(float x, float y);
   void loadProgress();
   const char* key(const char* name) const;   // Speicherschlüssel des aktuellen Modus („bc_…“ bzw. „bk_…“)
   int pages() const { return (levelCount() + 11) / 12; }
   void drawTaskCard(Scene& s, float a);
   void speak(const char* what);
+  void showHint();   // Tipp-Fenster (bei den Kleinen wird der Tipp vorgelesen)
   int skipCost() const { return diff_ == 0 ? 1 : 3; }
   float playTime() const { return solvedAt_ >= 0 ? solvedAt_ : levelT_; }
   bool isDone(int i) const { return (done_ >> i) & 1; }
@@ -78,7 +86,12 @@ class Game : Host {
   dk::Synth& synth_;
   dk::Store& store_;
   Level* levels_[LEVELS] = {};
-  bool kids_ = false, whoSpoken_ = false;
+  int mode_ = ADULT;
+  bool whoSpoken_ = false;
+  // Einstellungen
+  int brightIdx_ = 2, settingsBack_ = 0, confirm_ = -1;
+  float confirmT_ = -10;
+  bool swiped_ = false, powerReq_ = false;
   int whoBack_ = -1, whoBackOverlay_ = 0;   // wohin es nach „Wer spielt?“ zurückgeht (-1: zum Titel)
   mutable char key_[16];
   Screen screen_ = WHO;
